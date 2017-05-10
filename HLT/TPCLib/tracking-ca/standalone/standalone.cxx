@@ -20,13 +20,14 @@
 #endif
 
 #include "AliHLTTPCGMMergedTrack.h"
+#include "interface/outputtrack.h"
 
 //#define BROKEN_EVENTS
 
 int main(int argc, char** argv)
 {
 	int i;
-	int RUNGPU = 1, DebugLevel = 0, NEvents = -1, StartEvent = 0, noprompt = 0, cudaDevice = -1, forceSlice = -1, sliceCount = -1, eventDisplay = 0, runs = 1, runs2 = 1, merger = 1, cleardebugout = 0, outputcontrolmem = 0, clusterstats = 0, continueOnError = 0, seed = -1;
+	int RUNGPU = 1, DebugLevel = 0, NEvents = -1, StartEvent = 0, noprompt = 0, cudaDevice = -1, forceSlice = -1, sliceCount = -1, eventDisplay = 0, runs = 1, runs2 = 1, merger = 1, cleardebugout = 0, outputcontrolmem = 0, clusterstats = 0, continueOnError = 0, seed = -1, writeoutput = 0, writebinary = 0;
 	void* outputmemory = NULL;
 	AliHLTTPCCAStandaloneFramework &hlt = AliHLTTPCCAStandaloneFramework::Instance();
 	char EventsDir[256] = "";
@@ -67,6 +68,16 @@ int main(int argc, char** argv)
 		if ( !strcmp( argv[i], "-CONTINUE" ) ) 
 		{
 			continueOnError=1;        
+		}
+		
+		if ( !strcmp( argv[i], "-WRITE" ) ) 
+		{
+			writeoutput=1;        
+		}
+
+		if ( !strcmp( argv[i], "-WRITEBINARY" ) ) 
+		{
+			writebinary=1;        
 		}
 
 		if ( !strcmp( argv[i], "-DEBUG" ) && argc > i + 1)
@@ -186,12 +197,21 @@ int main(int argc, char** argv)
 #endif
 	}	
 	std::ofstream CPUOut, GPUOut;
+	FILE* fpBinaryOutput = NULL;
 
 	if (DebugLevel >= 4)
 	{
 		CPUOut.open("CPU.out");
 		GPUOut.open("GPU.out");
 		omp_set_num_threads(1);
+	}
+	if (writebinary)
+	{
+		if ((fpBinaryOutput = fopen("output.bin", "w+b")) == NULL)
+		{
+			printf("Error opening output file\n");
+			exit(1);
+		}
 	}
 
 	if (outputcontrolmem)
@@ -221,11 +241,8 @@ int main(int argc, char** argv)
 	sliceCount = hlt.GetGPUMaxSliceCount();
 	hlt.SetGPUTracker(RUNGPU);
 
-	printf("Reading Settings\n");
-	std::ifstream in("events/settings.dump");
-	hlt.ReadSettings(in);
-	in.close();
-
+	hlt.SetSettings();
+	
 	for( int i=0; i < argc; i++ ){
 		if ( !strcmp( argv[i], "-GPUOPT" ) && argc >= i + 1 ) 
 		{
@@ -246,6 +263,7 @@ int main(int argc, char** argv)
 	for (int jj = 0;jj < runs2;jj++) {if (runs2 > 1) printf("RUN2: %d\n", jj);
 	for (i = StartEvent;i < NEvents || NEvents == -1;i++)
 	{
+		std::ifstream in;
 		char filename[256];
 		sprintf(filename, "events%s/event.%d.dump", EventsDir, i);
 		in.open(filename, std::ifstream::binary);
@@ -299,9 +317,15 @@ int main(int argc, char** argv)
 				hlt.SetOutputControl((char*) outputmemory, outputcontrolmem);
 			}
 
-			if (hlt.ProcessEvent(forceSlice) && !continueOnError)
+			int tmpRetVal = hlt.ProcessEvent(forceSlice);
+			if (tmpRetVal == 2)
 			{
-				printf("Error occured\n");
+				continueOnError = 0; //Forced exit from event display loop
+				noprompt = 1;
+			}
+			if (tmpRetVal && !continueOnError)
+			{
+				if (tmpRetVal != 2) printf("Error occured\n");
 #ifdef BROKEN_EVENTS
 				continue;
 #endif
@@ -311,13 +335,64 @@ int main(int argc, char** argv)
 			if (merger)
 			{
 				const AliHLTTPCGMMerger& merger = hlt.Merger();
+				if (writeoutput)
+				{
+					char filename[1024];
+					sprintf(filename, "output.%d.txt", i);
+					printf("Creating output file %s\n", filename);
+					FILE* foutput = fopen(filename, "w+");
+					if (foutput == NULL)
+					{
+						printf("Error creating file\n");
+						exit(1);
+					}
+					fprintf(foutput, "Event %d\n", i);
+					for (int k = 0;k < merger.NOutputTracks();k++)
+					{
+						const AliHLTTPCGMMergedTrack& track = merger.OutputTracks()[k];
+						const AliHLTTPCGMTrackParam& param = track.GetParam();
+						fprintf(foutput, "Track %d: %4s Alpha %f X %f Y %f Z %f SinPhi %f DzDs %f q/Pt %f - Clusters ", k, track.OK() ? "OK" : "FAIL", track.GetAlpha(), param.GetX(), param.GetY(), param.GetZ(), param.GetSinPhi(), param.GetDzDs(), param.GetQPt());
+						for (int l = 0;l < track.NClusters();l++)
+						{
+							fprintf(foutput, "%d ", merger.OutputClusterIds()[track.FirstClusterRef() + l]);
+						}
+						fprintf(foutput, "\n");
+					}
+					fclose(foutput);
+				}
+				
+				if (writebinary)
+				{
+					int numTracks = merger.NOutputTracks();
+					fwrite(&numTracks, sizeof(numTracks), 1, fpBinaryOutput);
+					for (int k = 0;k < numTracks;k++)
+					{
+						OutputTrack tmpTrack;
+						const AliHLTTPCGMMergedTrack& track = merger.OutputTracks()[k];
+						const AliHLTTPCGMTrackParam& param = track.GetParam();
+						
+						tmpTrack.Alpha = track.GetAlpha();
+						tmpTrack.X = param.GetX();
+						tmpTrack.Y = param.GetY();
+						tmpTrack.Z = param.GetZ();
+						tmpTrack.SinPhi = param.GetSinPhi();
+						tmpTrack.DzDs = param.GetDzDs();
+						tmpTrack.QPt = param.GetQPt();
+						tmpTrack.NClusters = track.NClusters();
+						tmpTrack.FitOK = track.OK();
+						fwrite(&tmpTrack, sizeof(tmpTrack), 1, fpBinaryOutput);
+						const unsigned int* hitIds = merger.OutputClusterIds() + track.FirstClusterRef();
+						fwrite(hitIds, sizeof(hitIds[0]), track.NClusters(), fpBinaryOutput);
+					}
+				}
+				
 				if (clusterstats)
 				{
 					unsigned int minid = 2000000000, maxid = 0;
-					for (int i = 0;i < merger.NOutputTrackClusters();i++)
+					for (int k = 0;k < merger.NOutputTrackClusters();k++)
 					{
-						if (merger.OutputClusterIds()[i] < minid) minid = merger.OutputClusterIds()[i];
-						if (merger.OutputClusterIds()[i] > maxid) maxid = merger.OutputClusterIds()[i];
+						if (merger.OutputClusterIds()[k] < minid) minid = merger.OutputClusterIds()[k];
+						if (merger.OutputClusterIds()[k] > maxid) maxid = merger.OutputClusterIds()[k];
 					}
 					printf("\nCluster id range: %d %d\n", minid, maxid);
 					char* idused = new char[maxid - minid + 1];
@@ -333,28 +408,28 @@ int main(int argc, char** argv)
 						}
 					}
 					int nClustersUsed = 0;
-					for (unsigned int i = 0;i < maxid - minid;i++)
+					for (unsigned int k = 0;k < maxid - minid;k++)
 					{
-						nClustersUsed += idused[i];
+						nClustersUsed += idused[k];
 					}
 					delete[] idused;
 					int totalclusters = 0;
-					for (int i = 0;i < hlt.NSlices();i++)
+					for (int k = 0;k < hlt.NSlices();k++)
 					{
-						totalclusters += hlt.ClusterData(i).NumberOfClusters();
+						totalclusters += hlt.ClusterData(k).NumberOfClusters();
 					}
 					printf("Clusters used: %d of %d, %4.2f%%\n", nClustersUsed, totalclusters, 100. * (float) nClustersUsed / (float) totalclusters);
 				}
 
 				if (clusterstats >= 2)
 				{
-					for (int i = 0;i < merger.NOutputTracks();i++)
+					for (int k = 0;k < merger.NOutputTracks();k++)
 					{
 						const AliHLTTPCGMMergedTrack* tracks = merger.OutputTracks();
-						int nCluster = tracks[i].NClusters();
+						int nCluster = tracks[k].NClusters();
 						if (nCluster < 0)
 						{
-							printf("Error in Merger: Track %d contains %d clusters\n", i, nCluster);
+							printf("Error in Merger: Track %d contains %d clusters\n", k, nCluster);
 							return(1);
 						}
 						else
@@ -381,6 +456,10 @@ breakrun:
 	{
 		CPUOut.close();
 		GPUOut.close();
+	}
+	if (writebinary)
+	{
+		fclose(fpBinaryOutput);
 	}
 
 	hlt.Merger().Clear();

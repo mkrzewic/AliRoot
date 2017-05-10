@@ -103,6 +103,9 @@ public:
   /** unpacked RAW data */
   static const AliHLTComponentDataType fgkUnpackedRawDataType;          // see above
   static const AliHLTComponentDataType& UnpackedRawDataType();
+  /** unpacked RAW data late filling*/
+  static const AliHLTComponentDataType fgkUnpackedRawLateDataType;      // see above
+  static const AliHLTComponentDataType& UnpackedRawLateDataType();
   /** cluster data */
   static const AliHLTComponentDataType fgkClustersDataType;             // see above
   static const AliHLTComponentDataType& ClustersDataType();
@@ -120,6 +123,9 @@ public:
   /** HW cluster data */
   static const AliHLTComponentDataType fgkHWClustersDataType;           // see above
   static const AliHLTComponentDataType& HWClustersDataType(); 
+  /** TPC DEDX Data (new format) */
+  static const AliHLTComponentDataType fgkTPCdEdxNew;           // see above
+  static const AliHLTComponentDataType& TPCdEdxNew(); 
   /** track segments in local coordinates */
   static const AliHLTComponentDataType fgkTrackSegmentsDataType;        // see above
   static const AliHLTComponentDataType& TrackSegmentsDataType();

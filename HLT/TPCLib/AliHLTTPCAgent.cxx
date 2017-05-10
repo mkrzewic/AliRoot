@@ -64,6 +64,8 @@ AliHLTTPCAgent gAliHLTTPCAgent;
 #include "AliHLTTPCClusterTransformationComponent.h"
 #include "AliHLTTPCClusterTransformationPrepareComponent.h"
 #include "AliHLTTPCOfflinePreprocessorWrapperComponent.h"
+#include "AliHLTTPCFastdEdxComponent.h"
+#include "test/AliHLTTPCRawClusterDumpComponent.h"
 
 /** ROOT macro for the implementation of ROOT specific class methods */
 ClassImp(AliHLTTPCAgent)
@@ -200,7 +202,8 @@ int AliHLTTPCAgent::CreateConfigurations(AliHLTConfigurationHandler* handler,
 	  if (sinkRawData.Length()>0) sinkRawData+=" ";
 	  sinkRawData+=publisher;
 	} else {
-	  arg.Form("-slice %d -partition %d", slice, part);
+	  //arg.Form("-slice %d -partition %d", slice, part);
+	  arg.Form("-slice %d -partition %d -late-fill", slice, part);
 	  handler->CreateConfiguration(publisher.Data(), "TPCDigitPublisher", NULL , arg.Data());
 	  if (hwcfemuInput.Length()>0) hwcfemuInput+=" ";
 	  hwcfemuInput+=publisher;
@@ -219,9 +222,12 @@ int AliHLTTPCAgent::CreateConfigurations(AliHLTConfigurationHandler* handler,
  
     TString hwcfDecoder = "TPC-HWCFDecoder";
     handler->CreateConfiguration(hwcfDecoder.Data(), "TPCHWClusterDecoder",hwclustOutput.Data(), "");
+	
+	arg="-offline-mode";
+	if (!bPublishRaw) arg+=" -do-mc";
 
     TString clusterTransformation = "TPC-ClusterTransformation";
-    handler->CreateConfiguration(clusterTransformation.Data(), "TPCClusterTransformation",hwcfDecoder.Data(), "-offline-mode");
+    handler->CreateConfiguration(clusterTransformation.Data(), "TPCClusterTransformation",hwcfDecoder.Data(), arg.Data() );
 
     if (trackerInput.Length()>0) trackerInput+=" ";
     trackerInput+=clusterTransformation;
@@ -402,6 +408,7 @@ int AliHLTTPCAgent::RegisterComponents(AliHLTComponentHandler* pHandler) const
   pHandler->AddComponent(new AliHLTTPCCAGlobalMergerComponent);
   pHandler->AddComponent(new AliHLTTPCTrackMCMarkerComponent);
   pHandler->AddComponent(new AliHLTTPCdEdxComponent);
+  pHandler->AddComponent(new AliHLTTPCFastdEdxComponent);
   pHandler->AddComponent(new AliHLTTPCdEdxMonitoringComponent);
   pHandler->AddComponent(new AliHLTTPCDigitPublisherComponent);
   pHandler->AddComponent(new AliHLTTPCDigitDumpComponent);
@@ -421,6 +428,7 @@ int AliHLTTPCAgent::RegisterComponents(AliHLTComponentHandler* pHandler) const
   pHandler->AddComponent(new AliHLTTPCClusterTransformationComponent);
   pHandler->AddComponent(new AliHLTTPCClusterTransformationPrepareComponent);
   pHandler->AddComponent(new AliHLTTPCOfflinePreprocessorWrapperComponent);
+  pHandler->AddComponent(new AliHLTTPCRawClusterDumpComponent);
   return 0;
 }
 

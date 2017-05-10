@@ -120,7 +120,16 @@ class AliHLTTPCHWCFEmulatorComponent : public AliHLTProcessor
     using AliHLTProcessor::DoEvent;
   
  private:
-
+	 
+  struct tempBufferDescriptor
+  {
+	  void* fPtr;
+	  size_t fSize;
+	  int fEvent;
+	  int fID;
+	  int fFillState;
+  };
+  
   /** copy constructor prohibited */
   AliHLTTPCHWCFEmulatorComponent(const AliHLTTPCHWCFEmulatorComponent&);
 
@@ -155,17 +164,25 @@ class AliHLTTPCHWCFEmulatorComponent : public AliHLTProcessor
   int            fNoiseSuppression; // Slightly modified algorithm for peak finding aimed to suppress noise
   int            fNoiseSuppressionMinimum; // Slightly modified algorithm for minimum finding aimed to suppress noise
   int            fNoiseSuppressionNeighbor; // Consider next neighbor as peak/neighbor during peak finder with noise suppression
+  int            fPadNoiseReduction; //Simple noise reduction in pad direction
   int            fSmoothing; //Smoothing parameter for peak finder
   int            fSmoothingThreshold; //Threshold when to flag peaks / minima without smoothing
   AliHLTUInt32_t fChargeFluctuation; // allowed charge fluctuation for peak finding 
   AliHLTUInt32_t fTagDeconvolutedClusters; // tag deconvoluted dclusters
+  AliHLTUInt32_t fTagEdgeClusters; // tag edge clusters
+  int fCorrectEdgeClusters; //correct edge clusters by shifting to peak
   Bool_t fProcessingRCU2Data; // processing of RCU2 data - no split in two input branches
   Bool_t fUseGain; // Use gain correction factor from OCDB
   Double_t fIORatioCorrection; // multiplier for data size ratio Output/Input 
   Int_t fDebug; // debug level
+  size_t fForceOutputBufferSize;       //!
   AliHLTTPCHWCFSupport fCFSupport;     // !transient
   AliHLTTPCHWCFEmulator fCFEmulator;   // !transient
   AliHLTComponentBenchmark fBenchmark; // benchmark
+  
+  bool fEnableTempBuffer;                     //!
+  tempBufferDescriptor fTempBuffer[36][6][2]; //!
+  bool fTempBufferUsed;                       //!
   
 };
 #endif

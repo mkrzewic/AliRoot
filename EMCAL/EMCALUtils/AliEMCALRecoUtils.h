@@ -296,7 +296,7 @@ public:
   static Bool_t ExtrapolateTrackToEMCalSurface(AliVTrack *track, /*note, on success the call will change the track*/
                                                Double_t emcalR=440, Double_t mass=0.1396,
                                                Double_t step=20, Double_t minpT=0.35,
-                                               Bool_t useMassForTracking = kFALSE);
+                                               Bool_t useMassForTracking = kFALSE, Bool_t useDCA = kFALSE);
   static Bool_t ExtrapolateTrackToEMCalSurface(AliExternalTrackParam *trkParam, 
                                                Double_t emcalR, Double_t mass, Double_t step, 
                                                Float_t &eta, Float_t &phi, Float_t &pt);
@@ -419,7 +419,7 @@ public:
     if      ( nGen > 5 ) fNMCGenerToAccept = 5 ; 
     else if ( nGen < 0 ) fNMCGenerToAccept = 0 ; }
   
-  TString  GetNameOfMCGeneratorsToAccept(Int_t ig, TString name) const 
+  TString  GetNameOfMCGeneratorsToAccept(Int_t ig) const 
   { if (ig < fNMCGenerToAccept && ig > 0 && ig < 5 ) return fMCGenerToAccept[ig] ; 
     else return "" ; }
   void     SetNameOfMCGeneratorsToAccept(Int_t ig, TString name) { if ( ig < 5 || ig >= 0 ) fMCGenerToAccept[ig] = name ; }

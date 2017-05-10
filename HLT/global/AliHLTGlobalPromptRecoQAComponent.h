@@ -178,6 +178,8 @@ protected:
   double fvZEROTriggerChargeA;
   double fvZEROTriggerChargeC;
   double fvZEROTriggerChargeAC;
+  
+  double ftZEROAmplitude;
 
   double fzdcZNC;
   double fzdcZNA;
@@ -212,6 +214,8 @@ protected:
   TH2F* fHistTPCAallClustersRowPhi;
   TH2F* fHistTPCCattachedClustersRowPhi;
   TH2F* fHistTPCCallClustersRowPhi;
+  TH2F* fHistDeDxOffline;
+  TH2F* fHistDeDxNew[10];
 
   ClassDef(AliHLTGlobalPromptRecoQAComponent, 0)
 };

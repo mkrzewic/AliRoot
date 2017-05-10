@@ -21,7 +21,6 @@ CXXFILES					= code/AliHLTTPCCATracker.cxx \
 							  code/AliHLTTPCCAClusterData.cxx \
 							  code/AliHLTTPCCATrackerFramework.cxx \
 							  standalone/AliHLTLogging.cxx \
-							  standalone/AliHLTTPCTransform.cxx \
 							  cagpubuild/AliHLTTPCCAGPUTrackerBase.cxx
 							  
 CUFILES						= cagpubuild/AliHLTTPCCAGPUTrackerNVCC.cu
@@ -30,3 +29,5 @@ ASMFILES					=
 CONFIG_CUDA					= 1
 
 ALLDEP						+= config_common.mak
+
+GCCCUDA						= /usr/x86_64-pc-linux-gnu/gcc-bin/5.4.0/x86_64-pc-linux-gnu-gcc

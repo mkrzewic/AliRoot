@@ -113,6 +113,7 @@ const AliHLTTPCHWCFBunch *AliHLTTPCHWCFPeakFinderUnit::OutputStream()
   fOutput.fPad = fkBunch->fPad;
   fOutput.fBranch = fkBunch->fBranch;
   fOutput.fBorder = fkBunch->fBorder;
+  fOutput.fEdge = fkBunch->fEdge;
   fOutput.fGain = fkBunch->fGain;
   fOutput.fData.clear();
   fOutput.fData.insert(fOutput.fData.end(),fkBunch->fData.begin(), fkBunch->fData.end());
@@ -190,7 +191,7 @@ const AliHLTTPCHWCFBunch *AliHLTTPCHWCFPeakFinderUnit::OutputStream()
   if( n>0 ){
     if( !slope )
     {
-      if( fNoiseSuppressionNeighbor >= 3 && n>3 && qLast4 > qLast4 && qLast4 > qLast2 && qLast4 > qLast) {fOutput.fData[n-4].fPeak = 1;fOutput.fData[n-1].fPeak = 2;}
+      if( fNoiseSuppressionNeighbor >= 3 && n>3 && qLast4 > qLast3 && qLast4 > qLast2 && qLast4 > qLast) {fOutput.fData[n-4].fPeak = 1;fOutput.fData[n-1].fPeak = 2;}
       else if( fNoiseSuppressionNeighbor >= 2 && n>2 && qLast3 > qLast2 && qLast3 > qLast) {fOutput.fData[n-3].fPeak = 1;fOutput.fData[n-1].fPeak = 2;}
       else if( fNoiseSuppressionNeighbor && n>1 && qLast2 > qLast) {fOutput.fData[n-2].fPeak = 1;fOutput.fData[n-1].fPeak = 2;}
       else fOutput.fData[n-1].fPeak = 1;
