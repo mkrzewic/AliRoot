@@ -559,14 +559,14 @@ int AliHLTTask::ProcessTask(Int_t eventNo, AliHLTUInt32_t eventType, AliHLTTrigg
       iOutputDataSize=(long unsigned int)(fInputMultiplier*iInputDataVolume) + iConstBase;
       //HLTDebug("task %s: reqired output size %d", GetName(), iOutputDataSize);
       }
-	  //Add additional buffer space for possibly required alignment corrections
+      //Add additional buffer space for possibly required alignment corrections
       int tmpOverhead = iOutputDataSize % kAliHLTBlockAlignment;
       if (tmpOverhead) iOutputDataSize += kAliHLTBlockAlignment - tmpOverhead;
       iOutputDataSize += kAliHLTBlockAlignment;
-      if (iNofTrial == 0 && fpDataBuffer->GetMaxBufferSize() < iOutputDataSize) {
+      if (fpDataBuffer->GetMaxBufferSize() < iOutputDataSize) {
         //If the estimated buffer size exceeds the maximum buffer size of AliHLTRawBuffer, decrease the buffer size.
         //The estimation is often quite high, and GetMaxBufferSize should usually return a size that is sufficient.
-        HLTImportant("Reducing estimated output buffer size of %lu to maximum output buffer size\n", iOutputDataSize);
+        HLTImportant("Reducing estimated output buffer size of %lu to maximum output buffer size (%lu)\n", iOutputDataSize, fpDataBuffer->GetMaxBufferSize());
         iOutputDataSize = fpDataBuffer->GetMaxBufferSize();
       }
       if (iNofTrial>0) {
@@ -760,7 +760,7 @@ int AliHLTTask::ProcessTask(Int_t eventNo, AliHLTUInt32_t eventType, AliHLTTrigg
 	  }
 	}
       } else {
-	HLTError("no target buffer available");
+	HLTFatal("no target buffer available");
 	iResult=-EFAULT;
       }
     } while (iResult==-ENOSPC && iNofTrial++<1);

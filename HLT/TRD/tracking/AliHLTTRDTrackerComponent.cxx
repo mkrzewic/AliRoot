@@ -48,6 +48,8 @@
 #include "AliHLTTrackMCLabel.h"
 #include "AliHLTTRDTrackData.h"
 #include <map>
+#include <vector>
+#include <algorithm>
 
 
 ClassImp(AliHLTTRDTrackerComponent)
@@ -56,7 +58,9 @@ AliHLTTRDTrackerComponent::AliHLTTRDTrackerComponent() :
   fTracker(0x0),
   fTrackList(0x0),
   fDebugTrackOutput(false),
-  fVerboseDebugOutput(false)
+  fVerboseDebugOutput(false),
+  fRequireITStrack(false),
+  fBenchmark("TRDTracker")
 {
 }
 
@@ -66,7 +70,9 @@ AliHLTTRDTrackerComponent::AliHLTTRDTrackerComponent( const AliHLTTRDTrackerComp
   fTrackList(0x0),
   AliHLTProcessor(),
   fDebugTrackOutput(false),
-  fVerboseDebugOutput(false)
+  fVerboseDebugOutput(false),
+  fRequireITStrack(false),
+  fBenchmark("TRDTracker")
 {
   // see header file for class documentation
   HLTFatal( "copy constructor untested" );
@@ -89,6 +95,7 @@ const char* AliHLTTRDTrackerComponent::GetComponentID() {
 
 void AliHLTTRDTrackerComponent::GetInputDataTypes( std::vector<AliHLTComponentDataType>& list) {
   list.clear();
+  list.push_back( kAliHLTDataTypeTrack|kAliHLTDataOriginITS );
   list.push_back( kAliHLTDataTypeTrack|kAliHLTDataOriginTPC );
   list.push_back( kAliHLTDataTypeTrackMC|kAliHLTDataOriginTPC );
   list.push_back( AliHLTTRDDefinitions::fgkTRDTrackletDataType );
@@ -140,11 +147,19 @@ int AliHLTTRDTrackerComponent::ReadConfigurationString(  const char* arguments )
     if ( argument.CompareTo("-debugOutput") == 0 ) {
       fDebugTrackOutput = true;
       fVerboseDebugOutput = true;
-      HLTWarning( "Tracks are dumped in the AliHLTTRDTrack format" );
+      HLTInfo( "Tracks are dumped in the AliHLTTRDTrack format" );
       continue;
     }
+
+    if ( argument.CompareTo("-requireITStrack") == 0 ) {
+      fRequireITStrack = true;
+      HLTInfo( "TRD tracker requires seeds (TPC tracks) to have an ITS match" );
+      continue;
+    }
+
     HLTError( "Unknown option \"%s\"", argument.Data() );
     iResult = -EINVAL;
+
   }
   delete pTokens;
 
@@ -155,18 +170,21 @@ int AliHLTTRDTrackerComponent::ReadConfigurationString(  const char* arguments )
 // #################################################################################
 int AliHLTTRDTrackerComponent::DoInit( int argc, const char** argv ) {
   // see header file for class documentation
-  printf("AliHLTTRDTrackerComponent::DoInit\n");
 
   int iResult=0;
-  if ( fTracker ) return -EINPROGRESS;
+  if ( fTracker ) {
+    return -EINPROGRESS;
+  }
+
+  fBenchmark.Reset();
+  fBenchmark.SetTimer(0,"total");
+  fBenchmark.SetTimer(1,"reco");
 
   fTrackList = new TList();
-  if (!fTrackList)
+  if (!fTrackList) {
     return -ENOMEM;
+  }
   fTrackList->SetOwner(kFALSE);
-
-  fTracker = new AliHLTTRDTracker();
-  fTracker->Init();
 
   TString arguments = "";
   for ( int i = 0; i < argc; i++ ) {
@@ -175,6 +193,15 @@ int AliHLTTRDTrackerComponent::DoInit( int argc, const char** argv ) {
   }
 
   iResult = ReadConfigurationString( arguments.Data() );
+
+  fTracker = new AliHLTTRDTracker();
+  if (!fTracker) {
+    return -ENOMEM;
+  }
+  if (fVerboseDebugOutput) {
+    fTracker->EnableDebugOutput();
+  }
+  fTracker->Init();
 
   return iResult;
 }
@@ -208,8 +235,11 @@ int AliHLTTRDTrackerComponent::DoEvent
     return 0;
   }
 
+  fBenchmark.StartNewEvent();
+  fBenchmark.Start(0);
+
   AliHLTUInt32_t maxBufferSize = size;
-  size = 0; // output size  
+  size = 0; // output size
 
   int iResult=0;
 
@@ -222,6 +252,7 @@ int AliHLTTRDTrackerComponent::DoEvent
   std::vector< AliExternalTrackParam > tracksTPC;
   std::vector< int > tracksTPCLab;
   std::vector< int > tracksTPCId;
+  std::vector< int > tracksITSId;
 
   int nTrackletsTotal = 0;
   AliHLTTRDTrackletWord *tracklets = NULL;
@@ -229,8 +260,8 @@ int AliHLTTRDTrackerComponent::DoEvent
 
   for (int ndx=0; ndx<nBlocks && iResult>=0; ndx++) {
 
-    if (ndx > 2)
-      HLTWarning("unexpected number of blocks (%i) for this component, expected 2", ndx);
+    if (ndx > 4)
+      HLTWarning("unexpected number of blocks (%i) for this component, expected 4", ndx);
 
     const AliHLTComponentBlockData* iter = blocks+ndx;
 
@@ -248,9 +279,24 @@ int AliHLTTRDTrackerComponent::DoEvent
       else {
         HLTWarning("data mismatch in block %s (0x%08x): count %d, size %d -> ignoring track MC information", DataType2Text(pBlock->fDataType).c_str(), pBlock->fSpecification, dataPtr->fCount, pBlock->fSize);
       }
+      fBenchmark.AddInput(pBlock->fSize);
     }
 
 
+
+    // Read ITS tracks and store only the track IDs
+
+    if( iter->fDataType == ( kAliHLTDataTypeTrack|kAliHLTDataOriginITS ) ){
+      AliHLTTracksData* dataPtr = ( AliHLTTracksData* ) iter->fPtr;
+      int nTracks = dataPtr->fCount;
+      AliHLTExternalTrackParam* currOutTrack = dataPtr->fTracklets;
+      for( int itr=0; itr<nTracks; itr++ ){
+	      tracksITSId.push_back( currOutTrack->fTrackID );
+	      unsigned int dSize = sizeof( AliHLTExternalTrackParam ) + currOutTrack->fNPoints * sizeof( unsigned int );
+	      currOutTrack = ( AliHLTExternalTrackParam* )( (( Byte_t * )currOutTrack) + dSize );
+      }
+      fBenchmark.AddInput(iter->fSize);
+    }
 
     // Read TPC tracks
 
@@ -264,12 +310,13 @@ int AliHLTTRDTrackerComponent::DoEvent
         if (mcLabels.find(currOutTrack->fTrackID) != mcLabels.end() ) {
           mcLabel = mcLabels[currOutTrack->fTrackID];
         }
-	      tracksTPC.push_back( t );
+        tracksTPC.push_back( t );
         tracksTPCLab.push_back(mcLabel);
-	      tracksTPCId.push_back( currOutTrack->fTrackID );
+        tracksTPCId.push_back( currOutTrack->fTrackID );
 	      unsigned int dSize = sizeof( AliHLTExternalTrackParam ) + currOutTrack->fNPoints * sizeof( unsigned int );
 	      currOutTrack = ( AliHLTExternalTrackParam* )( (( Byte_t * )currOutTrack) + dSize );
       }
+      fBenchmark.AddInput(iter->fSize);
     }
 
     // Read TRD tracklets
@@ -277,12 +324,27 @@ int AliHLTTRDTrackerComponent::DoEvent
     if ( iter->fDataType == (AliHLTTRDDefinitions::fgkTRDTrackletDataType) ){
       tracklets = reinterpret_cast<AliHLTTRDTrackletWord*>( iter->fPtr );
       nTrackletsTotal = iter->fSize / sizeof(AliHLTTRDTrackletWord);
+      fBenchmark.AddInput(iter->fSize);
     }
 
   }// end read input blocks
 
   if (fVerboseDebugOutput) {
-    printf("TRDTrackerComponent recieved %i tracklets\n", nTrackletsTotal);
+    HLTInfo("TRDTrackerComponent received %i tracklets\n", nTrackletsTotal);
+  }
+
+  // remove tracks without ITS match
+  if (fRequireITStrack) {
+    int iTPCtrack = 0;
+    for (vector<AliExternalTrackParam>::iterator it = tracksTPC.begin(); it != tracksTPC.end(); ) {
+      if (std::find(tracksITSId.begin(), tracksITSId.end(), iTPCtrack) == tracksITSId.end()) {
+        it = tracksTPC.erase(it);
+      }
+      else {
+        ++it;
+      }
+      ++iTPCtrack;
+    }
   }
 
   fTracker->Reset();
@@ -293,7 +355,9 @@ int AliHLTTRDTrackerComponent::DoEvent
 	  fTracker->LoadTracklet(tracklets[iTracklet]);
   }
 
+  fBenchmark.Start(1);
   fTracker->DoTracking(&(tracksTPC[0]), &(tracksTPCLab[0]), tracksTPC.size());
+  fBenchmark.Stop(1);
 
   AliHLTTRDTrack *trackArray = fTracker->Tracks();
   int nTracks = fTracker->NTracks();
@@ -312,20 +376,20 @@ int AliHLTTRDTrackerComponent::DoEvent
   }
   // push back AliHLTExternalTrackParam (default)
   else {
- 
+
     AliHLTUInt32_t blockSize = AliHLTTRDTrackData::GetSize( nTracks );
     if (size + blockSize > maxBufferSize) {
       HLTWarning( "Output buffer exceeded for tracks" );
       return -ENOSPC;
     }
-    
+
     AliHLTTRDTrackData* outTracks = ( AliHLTTRDTrackData* )( outputPtr );
     outTracks->fCount = 0;
-      
+
     for (int iTrk=0; iTrk<nTracks; ++iTrk) {
       AliHLTTRDTrack &t = trackArray[iTrk];
       AliHLTTRDTrackDataRecord &currOutTrack = outTracks->fTracks[outTracks->fCount];
-      t.ConvertTo(currOutTrack);      
+      t.ConvertTo(currOutTrack);
       outTracks->fCount++;
     }
 
@@ -335,10 +399,11 @@ int AliHLTTRDTrackerComponent::DoEvent
     resultData.fSize = blockSize;
     resultData.fDataType = AliHLTTRDDefinitions::fgkTRDTrackDataType;
     outputBlocks.push_back( resultData );
+    fBenchmark.AddOutput(resultData.fSize);
 
     size += blockSize;
     outputPtr += resultData.fSize;
-    
+
     blockSize = 0;
 
     // space points calculated from tracklets
@@ -357,7 +422,7 @@ int AliHLTTRDTrackerComponent::DoEvent
       AliHLTTRDTrackPoint empty;
       empty.fX[0] = 0;
       empty.fX[1] = 0;
-      empty.fX[2] = 0;      
+      empty.fX[2] = 0;
       empty.fVolumeId = 0;
       for (int i=0; i<nTrackletsTotal; ++i) {
 	outTrackPoints->fPoints[i] = empty;
@@ -382,11 +447,15 @@ int AliHLTTRDTrackerComponent::DoEvent
     resultDataSP.fSize = blockSize;
     resultDataSP.fDataType = AliHLTTRDDefinitions::fgkTRDTrackPointDataType|kAliHLTDataOriginTRD;
     outputBlocks.push_back( resultDataSP );
+    fBenchmark.AddOutput(resultData.fSize);
     size += blockSize;
     outputPtr += resultDataSP.fSize;
 
     HLTInfo("TRD tracker: output %d tracks and %d track points",outTracks->fCount, outTrackPoints->fCount);
   }
+
+  fBenchmark.Stop(0);
+  HLTInfo( fBenchmark.GetStatistics() );
 
   return iResult;
 }

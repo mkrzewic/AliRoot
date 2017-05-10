@@ -60,7 +60,10 @@ fDoMerge(1),
 fAlreadyMerged(0),
 fTPCPresent(0),
 fProcessingRCU2Data(0),
+fCheckEdgeFlag(0),
 fAddRandomClusters(0),
+fSignificantBitsCharge(0),
+fSignificantBitsWidth(0),
 fBenchmark("HWClusterDecoder")
 {
   // see header file for class documentation
@@ -214,6 +217,12 @@ int AliHLTTPCHWClusterDecoderComponent::ScanConfigurationArgument(int argc, cons
     return 1;
   }
 
+  if (argument.CompareTo("-check-edge-flag") == 0)
+  {
+    fCheckEdgeFlag = 1;
+    return 1;
+  }
+
   if (argument.CompareTo("-add-random-clusters") == 0)
   {
     if (i + 1 >= argc)
@@ -223,6 +232,28 @@ int AliHLTTPCHWClusterDecoderComponent::ScanConfigurationArgument(int argc, cons
     }
     HLTWarning("TEST MODE - Adding Random Clusters");
     fAddRandomClusters = atoi(argv[i + 1]);
+    return 2;
+  }
+  
+  if (argument.CompareTo("-significant-bits-charge") == 0)
+  {
+    if (i + 1 >= argc)
+    {
+      HLTError("Argument missing for -significant-bits-charge");
+      return -EINVAL;
+    }
+    fSignificantBitsCharge = atoi(argv[i + 1]);
+    return 2;
+  }
+  
+  if (argument.CompareTo("-significant-bits-width") == 0)
+  {
+    if (i + 1 >= argc)
+    {
+      HLTError("Argument missing for -significant-bits-width");
+      return -EINVAL;
+    }
+    fSignificantBitsWidth = atoi(argv[i + 1]);
     return 2;
   }
 
@@ -252,6 +283,7 @@ int AliHLTTPCHWClusterDecoderComponent::InitClusterMerger()
     delete fpClusterMerger;
     fpClusterMerger = 0;
   }
+  fpClusterMerger->SetCheckEdgeFlag(fCheckEdgeFlag);
   return iResult;
 }
 
@@ -293,6 +325,7 @@ int AliHLTTPCHWClusterDecoderComponent::DoEvent(const AliHLTComponentEventData& 
   static int nCluDeconvolutedPad = 0;
   static int nCluDeconvolutedPadAndTime = 0;
   static int nCluDeconvolutedPadOrTime = 0;
+  static int nCluEdge = 0;
 
   for( unsigned long ndx=0; ndx<evtData.fBlockCnt; ndx++ ){
      
@@ -389,10 +422,15 @@ int AliHLTTPCHWClusterDecoderComponent::DoEvent(const AliHLTComponentEventData& 
 	      nCluDeconvolutedTime++;
 	      c.SetFlagSplitTime();
 	    }
+	    if( cl.IsEdge() )
+	    {
+	      nCluEdge++;
+	      c.SetFlagEdge();
+	    }
 	    if( cl.IsDeconvolutedPad() && cl.IsDeconvolutedTime() ) nCluDeconvolutedPadAndTime++;
 	    if( cl.IsDeconvolutedPad() || cl.IsDeconvolutedTime() ) nCluDeconvolutedPadOrTime++;
 	  }
-	}	
+	}
       }
 
       if (fAddRandomClusters)
@@ -436,8 +474,8 @@ int AliHLTTPCHWClusterDecoderComponent::DoEvent(const AliHLTComponentEventData& 
 
   double tmp = nCluTotal>0 ?100./nCluTotal :0;
 
-  HLTInfo(" decoded clusters total %d, deconvoluted pad %f\%, time %f\%, pd&&tm %f\%, pd||tm %f\%",
-	  nCluTotal,(nCluDeconvolutedPad*tmp), (nCluDeconvolutedTime*tmp), (nCluDeconvolutedPadAndTime*tmp), (nCluDeconvolutedPadOrTime*tmp) );
+  HLTInfo(" decoded clusters total %d, deconvoluted pad %f\%, time %f\%, pd&&tm %f\%, pd||tm %f, edge %f\%\%",
+	  nCluTotal,(nCluDeconvolutedPad*tmp), (nCluDeconvolutedTime*tmp), (nCluDeconvolutedPadAndTime*tmp), (nCluDeconvolutedPadOrTime*tmp), (nCluEdge*tmp));
 
   if( fDoMerge && fpClusterMerger ){
     fpClusterMerger->Clear();
@@ -448,6 +486,81 @@ int AliHLTTPCHWClusterDecoderComponent::DoEvent(const AliHLTComponentEventData& 
     int nMerged = fpClusterMerger->Merge();
     fpClusterMerger->Clear();
     HLTInfo("Merged %d clusters",nMerged);   
+  }
+  
+  if (fSignificantBitsCharge || fSignificantBitsWidth)
+  {
+#if defined(__GNUC__) || defined(__clang__)
+    for( UInt_t i=origOutputBlocksSize; i<outputBlocks.size(); i++){
+      AliHLTTPCRawClusterData* clusters = (AliHLTTPCRawClusterData*)( origOutputPtr + outputBlocks[i].fOffset);
+      for (int j = 0;j < clusters->fCount;j++)
+      {
+        if (fSignificantBitsCharge)
+        {
+          unsigned int val = clusters->fClusters[j].fCharge;
+          int ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+          if (val && ldz > fSignificantBitsCharge)
+          {
+            if (val & (1 << (ldz - fSignificantBitsCharge - 1)))
+            {
+              val += (1 << (ldz - fSignificantBitsCharge - 1));
+              ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+            }
+            val &= ((1 << ldz) - 1) ^ ((1 << (ldz - fSignificantBitsCharge)) - 1);
+            //printf("CHANGING X %x --> %x\n", clusters->fClusters[j].fCharge, val);
+            clusters->fClusters[j].fCharge = val;
+          }
+          
+          val = clusters->fClusters[j].fQMax;
+          ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+          if (val && ldz > fSignificantBitsCharge)
+          {
+            if (val & (1 << (ldz - fSignificantBitsCharge - 1)))
+            {
+              val += (1 << (ldz - fSignificantBitsCharge - 1));
+              ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+            }
+            val &= ((1 << ldz) - 1) ^ ((1 << (ldz - fSignificantBitsCharge)) - 1);
+            //printf("CHANGING Y %x --> %x\n", clusters->fClusters[j].fQMax, val);
+            clusters->fClusters[j].fQMax = val;
+          }
+        }
+        if (fSignificantBitsWidth)
+        {
+          unsigned int val = (unsigned int) round(clusters->fClusters[j].fSigmaPad2*AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kSigmaY2].fScale);
+          int ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+          if (val && ldz > fSignificantBitsWidth)
+          {
+            if (val & (1 << (ldz - fSignificantBitsWidth - 1)))
+            {
+              val += (1 << (ldz - fSignificantBitsWidth - 1));
+              ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+            }
+            val &= ((1 << ldz) - 1) ^ ((1 << (ldz - fSignificantBitsWidth)) - 1);
+            //printf("CHANGING A %f --> %f\n", clusters->fClusters[j].fSigmaPad2, (float) val / AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kSigmaY2].fScale);
+            clusters->fClusters[j].fSigmaPad2 = (float) val / AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kSigmaY2].fScale;
+          }
+          
+          val = (unsigned int) round(clusters->fClusters[j].fSigmaTime2*AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kSigmaZ2].fScale);
+          ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+          if (val && ldz > fSignificantBitsWidth)
+          {
+            if (val & (1 << (ldz - fSignificantBitsWidth - 1)))
+            {
+              val += (1 << (ldz - fSignificantBitsWidth - 1));
+              ldz = sizeof(unsigned int) * 8 - __builtin_clz(val);
+            }
+            val &= ((1 << ldz) - 1) ^ ((1 << (ldz - fSignificantBitsWidth)) - 1);
+            //printf("CHANGING B %f --> %f (%x --> %x, %d, %d)\n", clusters->fClusters[j].fSigmaTime2, (float) val / AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kSigmaZ2].fScale,
+            //  (unsigned int) round(clusters->fClusters[j].fSigmaTime2*AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kSigmaZ2].fScale), val, ldz, fSignificantBitsWidth);
+            clusters->fClusters[j].fSigmaTime2 = (float) val / AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kSigmaZ2].fScale;
+          }
+        }
+      }
+    }
+#else
+    HLTFatal("Using compiler that does not support clz, disabling significant bit truncation for HLT clusters");
+#endif
   }
 
   AliHLTTPCRawClustersDescriptor desc; 
@@ -523,4 +636,3 @@ void AliHLTTPCHWClusterDecoderComponent::PrintDebug(AliHLTUInt32_t *buffer, Int_
     printf("\n");
   }
 } // end of PrintDebug
-

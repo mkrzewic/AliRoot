@@ -70,12 +70,14 @@ class AliHLTTPCClusterStatComponent : public AliHLTProcessor, public AliOptionPa
   AliHLTTPCCAParam* fSliceParam;
   float fPolinomialFieldBz[6];
 
-  int fTotal, fSplitPad, fSplitTime, fSplitPadTime, fSplitPadOrTime, fAssigned; //!
+  int fTotal, fEdge, fSplitPad, fSplitTime, fSplitPadTime, fSplitPadOrTime, fAssigned; //!
 
+  int fCompressionStudy; //!
   int fPrintClusters; //!
   int fPrintClustersScaled; //!
   int fDumpClusters; //!
   int fAggregate; //!
+  int fSort; //!
   int fEvent;
   
   FILE* fp;

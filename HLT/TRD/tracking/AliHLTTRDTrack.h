@@ -29,6 +29,7 @@ class AliHLTTRDTrack : public AliKalmanTrack
   void SetNtracklets( Int_t nTrklts) { fNtracklets = nTrklts; }
 
   using AliExternalTrackParam::GetPredictedChi2;
+  using AliExternalTrackParam::Update;
 
   //methods below need to be implemented from abstract base class
   Double_t GetPredictedChi2(const AliCluster *c) { Error("AliHLTTRDTrack", "This is a dummy method and should never be used"); return -1.0; }
@@ -38,16 +39,16 @@ class AliHLTTRDTrack : public AliKalmanTrack
   Bool_t Update(const AliCluster* c, Double_t chi2, Int_t index) { Error("AliHLTTRDTrack", "This is a dummy method and should never be used"); return kFALSE; }
 
   // virtual method of AliKalmanTrack, it is used when the TRD track is saved in AliESDTrack
-  Int_t GetTrackletIndex(Int_t iLayer) const { 
+  Int_t GetTrackletIndex(Int_t iLayer) const {
     return GetTracklet(iLayer);
   }
 
 
   // convertion to HLT track structure
- 
+
   void ConvertTo( AliHLTTRDTrackDataRecord &t ) const;
   void ConvertFrom( const AliHLTTRDTrackDataRecord &t );
-  
+
 
  protected:
 

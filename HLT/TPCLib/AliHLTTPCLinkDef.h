@@ -77,6 +77,7 @@
 #pragma link C++ class AliHLTTPCClusterDumpComponent+;
 #pragma link C++ class AliHLTTPCTrackMCMarkerComponent+;
 #pragma link C++ class AliHLTTPCdEdxComponent+;
+#pragma link C++ class AliHLTTPCFastdEdxComponent+;
 #pragma link C++ class AliHLTTPCdEdxMonitoringComponent+;
 #pragma link C++ class AliHLTTPCHWCFExtractorUnit+;
 #pragma link C++ class AliHLTTPCHWCFPeakFinderUnit+;
@@ -92,6 +93,7 @@
 #pragma link C++ class AliHLTTPCHWClusterDecoderComponent+;
 #pragma link C++ class AliHLTTPCSpline2D3DObject+;
 #pragma link C++ class AliHLTTPCFastTransformObject+;
+#pragma link C++ class AliHLTTPCRawClusterDumpComponent+;
 #endif // __CINT__
 //
 // EOF

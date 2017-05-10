@@ -76,6 +76,7 @@ set(SRCS
     AliHLTTPCDataCheckerComponent.cxx
     AliHLTTPCDataPublisherComponent.cxx
     AliHLTTPCdEdxComponent.cxx
+    AliHLTTPCFastdEdxComponent.cxx
     AliHLTTPCdEdxMonitoringComponent.cxx
     AliHLTTPCDefinitions.cxx
     AliHLTTPCDigitDumpComponent.cxx
@@ -152,6 +153,7 @@ set(SRCS
     transform/AliHLTTPCSpline2D3D.cxx
     transform/AliHLTTPCSpline2D3DObject.cxx
     transform/AliHLTTPCFastTransformObject.cxx
+	test/AliHLTTPCRawClusterDumpComponent.cxx
    )
 
 # Headers from sources
