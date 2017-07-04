@@ -168,6 +168,7 @@ AliHLTGlobalPromptRecoQAComponent::AliHLTGlobalPromptRecoQAComponent()
   , fHistDeDxOffline(NULL)
   , fHistTRDHCId(NULL)
   , fHistTPCClusterFlags(NULL)
+  , fITSSPDvertexZ(0)
 {
   for (int i = 0;i < 10;i++) fHistDeDxNew[i] = NULL;
 }
@@ -548,6 +549,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoInit(int argc, const char** argv)
   fAxes["dEdx"].set( 300, 10., 3000., &fakePtr );
   fAxes["tpcClusterFlags"].set( 8, 0, 7, &fakePtr );
   fAxes["trdHCId"].set( 1080, 0, 1079, &fakePtr );
+  fAxes["ITSSPDvertexZ"].set( 100, -100., 100., &fITSSPDvertexZ );
 
   //Start Histograms
   NewHistogram(",fHistSPDclusters_SPDrawSize,SPD clusters vs SPD raw size,rawSizeSPD,nClustersSPD");
@@ -571,7 +573,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoInit(int argc, const char** argv)
   NewHistogram(",fHistZNA_VZEROTrigChargeA,ZNA vs. VZERO Trigger Charge A,vZEROTriggerChargeA,zdcZNA");
   NewHistogram(",fHistZNC_VZEROTrigChargeC,ZNC vs. VZERO Trigger Charge C,vZEROTriggerChargeC,zdcZNC");
   NewHistogram(",fHistZNT_VZEROTrigChargeT,ZN (A+C) vs. VZERO Trigger Charge (A+C),vZEROTriggerChargeAC,zdcZNAC");
-  NewHistogram(",fHistTZERO_ITSSAPTracks,TZERO Amplitude vs ITS SAP Tracks,nITSSAPtracks,tZEROAmplitude");
+  NewHistogram(",fHistTZERO_ITSSPDVertexZ,TZERO interaction time vs ITS vertex z,ITSSPDvertexZ,tZEROAmplitude");
   NewHistogram(",fHistVZERO_SPDClusters,SPD Clusters vs VZERO Trigger Charge (A+C),vZEROTriggerChargeAC,nClustersSPD");
   NewHistogram(",fHistVZERO_ITSSAPTracks,ITS SAP Tracks vs VZERO Trigger Charge (A+C),vZEROTriggerChargeAC,nITSSAPtracks");
 
@@ -627,7 +629,7 @@ static void ReBinLogX(TAxis* axis)
     new_bins[i] = TMath::Power(10, from + i * width);
   }
   axis->Set(bins, new_bins);
-  delete new_bins;
+  delete [] new_bins;
 } 
 
 //__________________________________________________________________________________________________
@@ -1076,6 +1078,15 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
     if (iter->fDataType == (kAliHLTDataTypeESDVertex | kAliHLTDataOriginITSSPD))
     {
       bITSSPDVertex = kTRUE;
+      const TObject* o = GetInputObjectFromIndex(ndx);
+      if (o)
+      {
+        const AliESDVertex* esdVertex = dynamic_cast<const AliESDVertex*>(o);
+        if (esdVertex)
+        {
+          fITSSPDvertexZ = esdVertex->GetZ();
+        }
+      }
     }
 
     //numbers of clusters
@@ -1153,7 +1164,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
         const AliESDTZERO* esdTZERO = dynamic_cast<const AliESDTZERO*>(o);
         if (esdTZERO)
         {
-          for (int i = 0;i < 24;i++) tZEROAmplitude += esdTZERO->GetT0amplitude()[i];
+          tZEROAmplitude = esdTZERO->GetT0TOF()[0];
         }
       }
     }
@@ -1363,7 +1374,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
       //gather all per slice/patch cluster blocks in the access arrays
       if ( iter->fDataType == (AliHLTTPCDefinitions::fgkRawClustersDataType))
       {
-        HLTInfo("have raw TPC clusters");
+        HLTDebug("have raw TPC clusters");
         Int_t slice = AliHLTTPCDefinitions::GetMinSliceNr(iter->fSpecification);
         Int_t patch = AliHLTTPCDefinitions::GetMinPatchNr(iter->fSpecification);
         if (slice<0 || slice>=AliHLTTPCGeometry::GetNSlice() || patch<0 || patch>=AliHLTTPCGeometry::GetNPatches()) {
@@ -1377,7 +1388,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
 
       if ( iter->fDataType == (AliHLTTPCDefinitions::ClustersXYZDataType()))
       {
-        HLTInfo("have TPC XYZ clusters");
+        HLTDebug("have TPC XYZ clusters");
         Int_t slice = AliHLTTPCDefinitions::GetMinSliceNr(iter->fSpecification);
         Int_t patch = AliHLTTPCDefinitions::GetMinPatchNr(iter->fSpecification);
         if (slice<0 || slice>=AliHLTTPCGeometry::GetNSlice() || patch<0 || patch>=AliHLTTPCGeometry::GetNPatches()) {
@@ -1458,7 +1469,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
       {
         AliHLTTracksData* tracks = static_cast<AliHLTTracksData*>(iter->fPtr);
         const AliHLTUInt8_t* currentTrackPtr = reinterpret_cast<const AliHLTUInt8_t*>(tracks->fTracklets);
-        HLTInfo("filling clusters attached to tracks, ntracks=%i",tracks->fCount);
+        HLTDebug("filling clusters attached to tracks, ntracks=%i",tracks->fCount);
         for (AliHLTUInt32_t i = 0; i < tracks->fCount; i++)
         {
           const AliHLTExternalTrackParam* track = reinterpret_cast<const AliHLTExternalTrackParam*>(currentTrackPtr);
@@ -1519,7 +1530,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
           continue;
         }
 
-        HLTInfo("filling raw clusters, n=%i",clusters->fCount);
+        HLTDebug("filling raw clusters, n=%i",clusters->fCount);
         for (unsigned i = 0;i < clusters->fCount;i++)
         {
           AliHLTTPCRawCluster& clusterRAW = clusters->fClusters[i];

@@ -174,6 +174,11 @@ extern const char kAliHLTDataOriginITS[kAliHLTComponentDataTypefOriginSize];
  */
 extern const char kAliHLTDataOriginITSOut[kAliHLTComponentDataTypefOriginSize];
 
+/** Data origin ITSExtrapolated
+ * @ingroup alihlt_component_datatypes
+ */
+extern const char kAliHLTDataOriginITSExtrapolated[kAliHLTComponentDataTypefOriginSize];
+
 /** Data origin ITS SPD
  * @ingroup alihlt_component_datatypes
  */
@@ -1435,6 +1440,8 @@ extern "C" {
   extern const AliHLTComponentDataType kAliHLTDataTypedNdPt;
   
   extern const AliHLTComponentDataType kAliHLTDataTypeCustomTrigger;
+
+  extern const AliHLTComponentDataType kAliHLTDataTypeDIMData;
 
   //////////////////////////////////////////////////////////////////////////
   //

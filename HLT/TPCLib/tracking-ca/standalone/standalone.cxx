@@ -27,7 +27,7 @@
 int main(int argc, char** argv)
 {
 	int i;
-	int RUNGPU = 1, DebugLevel = 0, NEvents = -1, StartEvent = 0, noprompt = 0, cudaDevice = -1, forceSlice = -1, sliceCount = -1, eventDisplay = 0, runs = 1, runs2 = 1, merger = 1, cleardebugout = 0, outputcontrolmem = 0, clusterstats = 0, continueOnError = 0, seed = -1, writeoutput = 0, writebinary = 0;
+	int RUNGPU = 1, DebugLevel = 0, NEvents = -1, StartEvent = 0, noprompt = 0, cudaDevice = -1, forceSlice = -1, sliceCount = -1, eventDisplay = 0, runs = 1, runs2 = 1, merger = 1, cleardebugout = 0, outputcontrolmem = 0, clusterstats = 0, continueOnError = 0, seed = -1, writeoutput = 0, writebinary = 0, resetids = 0, lowpt = 0;
 	void* outputmemory = NULL;
 	AliHLTTPCCAStandaloneFramework &hlt = AliHLTTPCCAStandaloneFramework::Instance();
 	char EventsDir[256] = "";
@@ -162,6 +162,16 @@ int main(int argc, char** argv)
 			eventDisplay = 1;
 		}
 
+		if ( !strcmp( argv[i], "-ENUMERATECLUSTERIDS" ) ) 
+		{
+			resetids = 1;
+		}
+		
+		if ( !strcmp( argv[i], "-LOWPT" ) ) 
+		{
+			lowpt = 1;
+		}
+
 		if ( !strcmp( argv[i], "-OUTPUTMEMORY" ) && argc > i + 1)
 		{
 			outputcontrolmem = atoi(argv[i + 1]);
@@ -199,6 +209,7 @@ int main(int argc, char** argv)
 	std::ofstream CPUOut, GPUOut;
 	FILE* fpBinaryOutput = NULL;
 
+	if (eventDisplay) noprompt = 1;
 	if (DebugLevel >= 4)
 	{
 		CPUOut.open("CPU.out");
@@ -242,6 +253,7 @@ int main(int argc, char** argv)
 	hlt.SetGPUTracker(RUNGPU);
 
 	hlt.SetSettings();
+	if (lowpt) hlt.SetHighQPtForward(1./0.1);
 	
 	for( int i=0; i < argc; i++ ){
 		if ( !strcmp( argv[i], "-GPUOPT" ) && argc >= i + 1 ) 
@@ -277,7 +289,7 @@ int main(int argc, char** argv)
 		printf("Loading Event %d\n", i);
 
 		hlt.StartDataReading(0);
-		hlt.ReadEvent(in);
+		hlt.ReadEvent(in, eventDisplay != 0 || resetids);
 		
 #ifdef BROKEN_EVENTS
 		int break_slices = rand() % 36;
@@ -335,6 +347,10 @@ int main(int argc, char** argv)
 			if (merger)
 			{
 				const AliHLTTPCGMMerger& merger = hlt.Merger();
+				if (eventDisplay && (writeoutput || writebinary))
+				{
+					printf("\nWARNING: Renumbering Cluster IDs for event display, Cluster IDs in output do NOT match IDs from input\n\n");
+				}
 				if (writeoutput)
 				{
 					char filename[1024];

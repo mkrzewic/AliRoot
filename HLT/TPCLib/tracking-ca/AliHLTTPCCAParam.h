@@ -79,6 +79,7 @@ MEM_CLASS_PRE() class AliHLTTPCCAParam
   GPUd() float ClusterError2CorrectionZ() const { return fClusterError2CorrectionZ; }
   GPUd() int MinNTrackClusters() const { return fMinNTrackClusters; }
   GPUd() float MaxTrackQPt() const { return fMaxTrackQPt; }
+  GPUd() float HighQPtForward() const { return fHighQPtForward; }
 
 
 
@@ -110,7 +111,8 @@ MEM_CLASS_PRE() class AliHLTTPCCAParam
     GPUd() void SetClusterError2CorrectionZ( float v ) { fClusterError2CorrectionZ = v; }
 
   GPUd() void SetMinNTrackClusters( int v ){ fMinNTrackClusters = v; }
-  GPUd() void SetMinTrackPt( float v ){ fMaxTrackQPt = CAMath::Abs(v)>0.02 ?1./CAMath::Abs(v) :1./0.02; }
+  GPUd() void SetMinTrackPt( float v ){ fMaxTrackQPt = CAMath::Abs(v)>0.015 ?1./CAMath::Abs(v) :1./0.015; }
+  GPUd() void SetHighQPtForward( float v ){ fHighQPtForward = v; }
 
     GPUd() float GetClusterError2( int yz, int type, float z, float angle ) const;
     GPUd() void GetClusterErrors2( int row, float z, float sinPhi, float cosPhi, float DzDs, float &Err2Y, float &Err2Z ) const;
@@ -159,6 +161,7 @@ MEM_CLASS_PRE() class AliHLTTPCCAParam
   float fClusterError2CorrectionZ; // correction for the squared cluster error during tracking
     int fMinNTrackClusters; //* required min number of clusters on the track
     float fMaxTrackQPt;    //* required max Q/Pt (==min Pt) of tracks
+	float fHighQPtForward; //Try to forward low Pt tracks with Q/Pt larger than this
 
     float fRowX[200];// X-coordinate of rows
     float fParamS0Par[2][3][7];    // cluster error parameterization coeficients

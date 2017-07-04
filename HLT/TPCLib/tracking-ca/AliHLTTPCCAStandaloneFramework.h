@@ -81,7 +81,7 @@ class AliHLTTPCCAStandaloneFramework
     void WriteTracks( std::ostream &out ) const;
 
     void SetSettings( );
-    void ReadEvent( std::istream &in );
+    void ReadEvent( std::istream &in, bool ResetIds = false );
     void ReadTracks( std::istream &in );
 
 	int InitGPU(int sliceCount = 1, int forceDeviceID = -1) { return(fTracker.InitGPU(sliceCount, forceDeviceID)); }
@@ -91,6 +91,7 @@ class AliHLTTPCCAStandaloneFramework
 	int SetGPUTracker(bool enable) { return(fTracker.SetGPUTracker(enable)); }
 	int GetGPUStatus() const { return(fTracker.GetGPUStatus()); }
 	int GetGPUMaxSliceCount() const { return(fTracker.MaxSliceCount()); }
+	void SetHighQPtForward(float v) { AliHLTTPCCAParam param = fMerger.SliceParam(); param.SetHighQPtForward(v); fMerger.SetSliceParam(param);}
 	void SetEventDisplay(int v) {fEventDisplay = v;}
 	void SetRunMerger(int v) {fRunMerger = v;}
 
