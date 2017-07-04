@@ -7,6 +7,8 @@
 #pragma link off all functions;
 
 #ifdef ZMQ
+#pragma link C++ class AliZMQhelpers::BaseDataTopic+;
+#pragma link C++ class AliZMQhelpers::DataTopic+;
 #endif
 
 #endif // __CINT__

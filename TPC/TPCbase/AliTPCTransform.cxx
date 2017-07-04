@@ -87,7 +87,7 @@ const Double_t AliTPCTransform::fgkSin20 = TMath::Sin(TMath::Pi()/9);       // s
 const Double_t AliTPCTransform::fgkCos20 = TMath::Cos(TMath::Pi()/9);       // cos(20)
 const Double_t AliTPCTransform::fgkMaxY2X = TMath::Tan(TMath::Pi()/18);      // tg(10)
 
-
+Float_t AliTPCTransform::fgDistDispThresh = 300.e-4;
 
 AliTPCTransform::AliTPCTransform():
   AliTransform(),
@@ -552,6 +552,7 @@ Bool_t AliTPCTransform::UpdateTimeDependentCache()
       else if (fCorrMapCache0->GetTimeStampEnd()<fCurrentTimeStamp) {
 	AliWarningF("Event timestamp %ld > map0 end %ld",fCurrentTimeStamp,fCorrMapCache0->GetTimeStampEnd());
       }
+      AliInfoF("Threshold of Dist.Disp. wrt reference to consider fluctuation: %e\n",fgDistDispThresh);
     }
     // do we need to update luminosity scaling params?
     if (timeChanged) { 
@@ -648,7 +649,8 @@ Bool_t AliTPCTransform::UpdateTimeDependentCache()
 							  fCurrentRecoParam->GetUseDriftCorrectionGY());
       }
       //
-      if (calib->IsTrgL0()) {
+      static bool hltMode = getenv("HLT_ONLINE_MODE") && strcmp(getenv("HLT_ONLINE_MODE"), "on") == 0;
+      if (!hltMode && calib->IsTrgL0()) {
 	// by defualt we assume L1 trigger is used - make a correction in case of  L0
 	AliCTPTimeParams* ctp = AliTPCcalibDB::Instance()->GetCTPTimeParams();
 	if (ctp) { //for TPC standalone runs no ctp info
@@ -819,7 +821,6 @@ TObjArray* AliTPCTransform::LoadCorrectionMaps(Bool_t refMap, Bool_t corr)
 void AliTPCTransform::ApplyCorrectionMap(int roc, int row, double xyzSect[3])
 {
   // apply correction from the map to a point at given ROC and row (IROC/OROC convention)
-  const float kDistDispThresh = 300e-4; // assume fluctuation dispersion if D[3]>Dref[3]+threshold
   EvalCorrectionMap(roc, row, xyzSect, fLastCorrRef, kTRUE);
   EvalCorrectionMap(roc, row, xyzSect, fLastCorr, kFALSE);
   if (fLastCorr[3]<1e-6) { // run specific map had no parameterization for this region, override by default
@@ -827,7 +828,8 @@ void AliTPCTransform::ApplyCorrectionMap(int roc, int row, double xyzSect[3])
     fLastCorr[3] = 0.f;
   }
   else {
-    fLastCorr[3] = fLastCorr[3]>(fLastCorrRef[3]+kDistDispThresh) ? TMath::Sqrt(fLastCorr[3]*fLastCorr[3] - fLastCorrRef[3]*fLastCorrRef[3]) : 0;
+    fLastCorr[3] = fLastCorr[3]>(fLastCorrRef[3]+fgDistDispThresh) ?
+      TMath::Sqrt(fLastCorr[3]*fLastCorr[3] - fLastCorrRef[3]*fLastCorrRef[3]) : 0;
     if (fCurrentMapScaling!=1.0f) {
       for (int i=3;i--;) fLastCorr[i] = (fLastCorr[i]-fLastCorrRef[i])*fCurrentMapScaling + fLastCorrRef[i];
       fLastCorr[3] *= fCurrentMapScaling;
@@ -934,7 +936,6 @@ void AliTPCTransform::ApplyDistortionMap(int roc, double xyzLab[3])
 {
   // apply distortion from the map to a point provided in LAB coordinate 
   // at given ROC and row (IROC/OROC convention)
-  const float kDistDispThresh = 20e-4; // assume fluctuation dispersion if D[3]>Dref[3]+threshold
   Global2RotatedGlobal(roc,xyzLab);  // now we are in sector coordinates
   EvalDistortionMap(roc, xyzLab, fLastCorrRef, kTRUE);
   EvalDistortionMap(roc, xyzLab, fLastCorr,    kFALSE);
@@ -944,7 +945,8 @@ void AliTPCTransform::ApplyDistortionMap(int roc, double xyzLab[3])
     fLastCorr[3] = 0.f;
   }
   else {
-    fLastCorr[3] = fLastCorr[3]>(fLastCorrRef[3]+kDistDispThresh) ? TMath::Sqrt(fLastCorr[3]*fLastCorr[3] - fLastCorrRef[3]*fLastCorrRef[3]) : 0;
+    fLastCorr[3] = fLastCorr[3]>(fLastCorrRef[3]+fgDistDispThresh) ?
+      TMath::Sqrt(fLastCorr[3]*fLastCorr[3] - fLastCorrRef[3]*fLastCorrRef[3]) : 0;
     if (fLastCorr[3]<fCurrentRecoParam->GetMinDistFluctMCRef()) fLastCorr[3] = fCurrentRecoParam->GetMinDistFluctMCRef();
     if (fCurrentMapScaling!=1.0f) {
       for (int i=3;i--;) fLastCorr[i] = (fLastCorr[i]-fLastCorrRef[i])*fCurrentMapScaling + fLastCorrRef[i];

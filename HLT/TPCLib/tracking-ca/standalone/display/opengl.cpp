@@ -1,5 +1,3 @@
-#define SEPERATE_GLOBAL_TRACKS
-
 #include "AliHLTTPCCADef.h"
 
 #ifdef R__WIN32
@@ -54,12 +52,11 @@ pthread_mutex_t semLockDisplay = PTHREAD_MUTEX_INITIALIZER;
 
 bool keys[256]; // Array Used For The Keyboard Routine
 
-#ifdef SEPERATE_GLOBAL_TRACKS
+bool separateGlobalTracks = 0;
 #define SEPERATE_GLOBAL_TRACKS_MAXID 5
-#else
-#define SEPERATE_GLOBAL_TRACKS_MAXID 100
-#endif
+#define TRACK_TYPE_ID_LIMIT 100
 #define SEPERATE_GLOBAL_TRACKS_DISTINGUISH_TYPES 6
+bool reorderFinalTracks = 0;
 
 float rotateX = 0, rotateY = 0;
 float mouseDnX, mouseDnY;
@@ -110,19 +107,16 @@ inline void SetColorInitLinks() { glColor3f(0.62, 0.1, 0.1); }
 inline void SetColorLinks() { glColor3f(0.8, 0.2, 0.2); }
 inline void SetColorSeeds() { glColor3f(0.8, 0.1, 0.85); }
 inline void SetColorTracklets() { glColor3f(1, 1, 1); }
-#ifdef SEPERATE_GLOBAL_TRACKSa
 inline void SetColorTracks()
 {
-	glColor3f(1., 1., 0.15);
+	if (separateGlobalTracks) glColor3f(1., 1., 0.15);
+	else glColor3f(0.4, 1, 0);
 }
-inline void SetColorGlobalTracks() { glColor3f(1., 0.15, 0.15); }
-#else
-inline void SetColorTracks()
+inline void SetColorGlobalTracks()
 {
-	glColor3f(0.4, 1, 0);
+	if (separateGlobalTracks) glColor3f(1., 0.15, 0.15);
+	else glColor3f(1.0, 0.4, 0);
 }
-inline void SetColorGlobalTracks() { glColor3f(1.0, 0.4, 0); }
-#endif
 inline void SetColorFinal()
 {
 	glColor3f(0, 0.7, 0.2);
@@ -175,7 +169,7 @@ int InitGL() // All Setup For OpenGL Goes Here
 	return (true);                                     // Initialization Went OK
 }
 
-inline void drawPointLinestrip(int cid, int id, int id_limit = 100)
+inline void drawPointLinestrip(int cid, int id, int id_limit = TRACK_TYPE_ID_LIMIT)
 {
 	glVertex3f(globalPos[cid].x, globalPos[cid].y, globalPos[cid].z);
 	if (globalPos[cid].w < id_limit) globalPos[cid].w = id;
@@ -314,32 +308,35 @@ void DrawFinal(AliHLTTPCCAStandaloneFramework &hlt)
 	{
 		const AliHLTTPCGMMergedTrack &track = merger.OutputTracks()[i];
 		if (track.NClusters() == 0) continue;
-		int *clusterused = new int[track.NClusters()];
-		for (int j = 0; j < track.NClusters(); j++)
-			clusterused[j] = 0;
+		int *clusterused = NULL;
+		int bestk = 0;
 		if (!track.OK()) continue;
 		glBegin(GL_LINE_STRIP);
-
-		float smallest = 1e20;
-		int bestk = 0;
-		for (int k = 0; k < track.NClusters(); k++)
+		
+		if (reorderFinalTracks)
 		{
-			int cid = merger.OutputClusterIds()[track.FirstClusterRef() + k];
-			float dist = globalPos[cid].x * globalPos[cid].x + globalPos[cid].y * globalPos[cid].y + globalPos[cid].z * globalPos[cid].z;
-			if (dist < smallest)
+			clusterused = new int[track.NClusters()];
+			for (int j = 0; j < track.NClusters(); j++)
+				clusterused[j] = 0;
+
+			float smallest = 1e20;
+			for (int k = 0; k < track.NClusters(); k++)
 			{
-				smallest = dist;
-				bestk = k;
+				int cid = merger.OutputClusterIds()[track.FirstClusterRef() + k];
+				float dist = globalPos[cid].x * globalPos[cid].x + globalPos[cid].y * globalPos[cid].y + globalPos[cid].z * globalPos[cid].z;
+				if (dist < smallest)
+				{
+					smallest = dist;
+					bestk = k;
+				}
 			}
 		}
 
 		int lastcid = merger.OutputClusterIds()[track.FirstClusterRef() + bestk];
-		clusterused[bestk] = 1;
+		if (reorderFinalTracks) clusterused[bestk] = 1;
 
-#ifdef SEPERATE_GLOBAL_TRACKS
 		bool linestarted = (globalPos[lastcid].w < SEPERATE_GLOBAL_TRACKS_DISTINGUISH_TYPES);
-		if (linestarted)
-#endif
+		if (!separateGlobalTracks || linestarted)
 		{
 			drawPointLinestrip(lastcid, 7, SEPERATE_GLOBAL_TRACKS_MAXID);
 		}
@@ -347,41 +344,44 @@ void DrawFinal(AliHLTTPCCAStandaloneFramework &hlt)
 		for (int j = 1; j < track.NClusters(); j++)
 		{
 			int bestcid = 0;
-			int bestk = 0;
-			float bestdist = 1e20;
-			for (int k = 0; k < track.NClusters(); k++)
+			if (reorderFinalTracks)
 			{
-				if (clusterused[k]) continue;
-				int cid = merger.OutputClusterIds()[track.FirstClusterRef() + k];
-				float dist = (globalPos[cid].x - globalPos[lastcid].x) * (globalPos[cid].x - globalPos[lastcid].x) +
-				             (globalPos[cid].y - globalPos[lastcid].y) * (globalPos[cid].y - globalPos[lastcid].y) +
-				             (globalPos[cid].z - globalPos[lastcid].z) * (globalPos[cid].z - globalPos[lastcid].z);
-				if (dist < bestdist)
+				bestk = 0;
+				float bestdist = 1e20;
+				for (int k = 0; k < track.NClusters(); k++)
 				{
-					bestdist = dist;
-					bestcid = cid;
-					bestk = k;
+					if (clusterused[k]) continue;
+					int cid = merger.OutputClusterIds()[track.FirstClusterRef() + k];
+					float dist = (globalPos[cid].x - globalPos[lastcid].x) * (globalPos[cid].x - globalPos[lastcid].x) +
+					             (globalPos[cid].y - globalPos[lastcid].y) * (globalPos[cid].y - globalPos[lastcid].y) +
+					             (globalPos[cid].z - globalPos[lastcid].z) * (globalPos[cid].z - globalPos[lastcid].z);
+					if (dist < bestdist)
+					{
+						bestdist = dist;
+						bestcid = cid;
+						bestk = k;
+					}
 				}
 			}
-#ifdef SEPERATE_GLOBAL_TRACKS
-			if (!linestarted && globalPos[bestcid].w < SEPERATE_GLOBAL_TRACKS_DISTINGUISH_TYPES)
+			else
+			{
+				bestcid = merger.OutputClusterIds()[track.FirstClusterRef() + j];
+			}
+			if (separateGlobalTracks && !linestarted && globalPos[bestcid].w < SEPERATE_GLOBAL_TRACKS_DISTINGUISH_TYPES)
 			{
 				drawPointLinestrip(lastcid, 7, SEPERATE_GLOBAL_TRACKS_MAXID);
 				linestarted = true;
 			}
-			if (linestarted)
-#endif
+			if (!separateGlobalTracks || linestarted)
 			{
 				drawPointLinestrip(bestcid, 7, SEPERATE_GLOBAL_TRACKS_MAXID);
 			}
-#ifdef SEPERATE_GLOBAL_TRACKS
-			if (linestarted && !(globalPos[bestcid].w < SEPERATE_GLOBAL_TRACKS_DISTINGUISH_TYPES)) linestarted = false;
-#endif
-			clusterused[bestk] = 1;
+			if (separateGlobalTracks && linestarted && !(globalPos[bestcid].w < SEPERATE_GLOBAL_TRACKS_DISTINGUISH_TYPES)) linestarted = false;
+			if (reorderFinalTracks) clusterused[bestk] = 1;
 			lastcid = bestcid;
 		}
 		glEnd();
-		delete[] clusterused;
+		if (reorderFinalTracks) delete[] clusterused;
 	}
 }
 
@@ -676,17 +676,24 @@ int DrawGLScene(bool doAnimation = false) // Here's Where We Do All The Drawing
 		{
 			AliHLTTPCCATracker &tracker = hlt.fTracker.fCPUTrackers[iSlice];
 			glNewList(glDLlines[iSlice][0], GL_COMPILE);
-			if (drawInitLinks)
+			if (drawInitLinks && iSlice == 0)
 			{
 				char *tmpMem[fgkNSlices];
+				int prelinksok = 1;
 				for (int i = 0; i < fgkNSlices; i++)
 				{
+					if (tracker.LinkTmpMemory() == NULL)
+					{
+						printf("Need to set TRACKER_KEEP_TEMPDATA for visualizing PreLinks!\n");
+						prelinksok = 0;
+						break;
+					}
 					AliHLTTPCCATracker &tracker = hlt.fTracker.fCPUTrackers[i];
 					tmpMem[i] = tracker.Data().Memory();
 					tracker.SetGPUSliceDataMemory((void *) tracker.LinkTmpMemory(), tracker.Data().Rows());
 					tracker.SetPointersSliceData(tracker.ClusterData());
 				}
-				DrawLinks(tracker, 1, true);
+				if (prelinksok) DrawLinks(tracker, 1, true);
 				for (int i = 0; i < fgkNSlices; i++)
 				{
 					AliHLTTPCCATracker &tracker = hlt.fTracker.fCPUTrackers[i];
@@ -722,9 +729,7 @@ int DrawGLScene(bool doAnimation = false) // Here's Where We Do All The Drawing
 		}
 
 		glNewList(glDLlinesFinal, GL_COMPILE);
-		//#ifndef SEPERATE_GLOBAL_TRACKS
 		DrawFinal(hlt);
-		//#endif
 		glEndList();
 
 		for (int iSlice = 0; iSlice < fgkNSlices; iSlice++)
@@ -791,6 +796,10 @@ int DrawGLScene(bool doAnimation = false) // Here's Where We Do All The Drawing
 					if (excludeClusters) goto skip1;
 					SetColorLinks();
 				}
+				else
+				{
+					SetColorClusters();
+				}
 				glCallList(glDLpoints[iSlice][2]);
 
 				if (drawSeeds)
@@ -821,6 +830,10 @@ int DrawGLScene(bool doAnimation = false) // Here's Where We Do All The Drawing
 				{
 					if (excludeClusters) goto skip3;
 					SetColorGlobalTracks();
+				}
+				else
+				{
+					SetColorClusters();
 				}
 				glCallList(glDLpoints[iSlice][6]);
 
@@ -1006,6 +1019,8 @@ void PrintHelp()
 	printf("[6]\t\tShow Tracks (after Tracklet Selector)\n");
 	printf("[7]\t\tShow Global Track Segments\n");
 	printf("[8]\t\tShow Final Merged Tracks (after Track Merger)\n");
+	printf("[J]\t\tShow global tracks as additional segments of final tracks\n");
+	printf("[M]\t\tReorder clusters of merged tracks before showing them geometrically\n");
 	printf("[T]\t\tTake Screenshot\n");
 	printf("[O]\t\tSave current camera position\n");
 	printf("[P]\t\tRestore camera position\n");
@@ -1041,6 +1056,16 @@ void HandleKeyRelease(int wParam)
 		else
 			drawSlice--;
 	}
+	else if (wParam == 'J')
+	{
+		separateGlobalTracks ^= 1;
+		updateDLList = true;
+	}
+	else if (wParam == 'M')
+	{
+		reorderFinalTracks ^= 1;
+		updateDLList = true;
+	}
 	else if (wParam == 'I')
 	{
 		updateDLList = true;
@@ -1071,7 +1096,10 @@ void HandleKeyRelease(int wParam)
 	else if (wParam == '1')
 		drawClusters ^= 1;
 	else if (wParam == '2')
+	{
 		drawInitLinks ^= 1;
+		updateDLList = true;
+	}
 	else if (wParam == '3')
 		drawLinks ^= 1;
 	else if (wParam == '4')
@@ -1573,116 +1601,16 @@ void init(void);
 
 int GetKey(int key)
 {
-	int wParam = 0;
-	switch (key)
-	{
-	case 50:
-		wParam = 16;
-		break;
-	case 10:
-		wParam = '1';
-		break;
-	case 11:
-		wParam = '2';
-		break;
-	case 12:
-		wParam = '3';
-		break;
-	case 13:
-		wParam = '4';
-		break;
-	case 14:
-		wParam = '5';
-		break;
-	case 15:
-		wParam = '6';
-		break;
-	case 16:
-		wParam = '7';
-		break;
-	case 17:
-		wParam = '8';
-		break;
-	case 18:
-		wParam = '9';
-		break;
-	case 57:
-		wParam = 'N';
-		break;
-	case 24:
-	case 9:
-		wParam = 'Q';
-		break;
-	case 27:
-		wParam = 'R';
-		break;
-	case 65:
-		wParam = 13;
-		break;
-	case 25:
-		wParam = 'W';
-		break;
-	case 38:
-		wParam = 'A';
-		break;
-	case 39:
-		wParam = 'S';
-		break;
-	case 40:
-		wParam = 'D';
-		break;
-	case 26:
-		wParam = 'E';
-		break;
-	case 41:
-		wParam = 'F';
-		break;
-	case 43:
-		wParam = 'H';
-		break;
-	case 33:
-		wParam = 'P';
-		break;
-	case 32:
-		wParam = 'O';
-		break;
-	case 42:
-		wParam = 'G';
-		break;
-	case 29:
-		wParam = 'Z';
-		break;
-	case 28:
-		wParam = 'T';
-		break;
-	case 30:
-		wParam = 'U';
-		break;
-	case 45:
-		wParam = 'K';
-		break;
-	case 46:
-		wParam = 'L';
-		break;
-	case 53:
-		wParam = 'X';
-		break;
-	case 31:
-		wParam = 'I';
-		break;
-	case 52:
-		wParam = 'Y';
-		break;
-	case 35:
-	case 86:
-		wParam = 107;
-		break;
-	case 61:
-	case 82:
-		wParam = 109;
-		break;
-	}
-	return (wParam);
+	if (key == 65453 || key == 45) return(109); //+
+	if (key == 65451 || key == 43) return(107); //-
+	if (key == 65505) return(16); //Shift
+	if (key == 65307) return('Q'); //ESC
+	if (key == 32) return(13); //Space
+	if (key > 255) return(0);
+	
+	if (key >= 'a' && key <= 'z') key += 'A' - 'a';
+	
+	return(key);
 }
 
 volatile static int needUpdate = 0;
@@ -1883,16 +1811,18 @@ void *OpenGLMain(void *ptr)
 
 				case KeyPress:
 				{
-					int wParam = GetKey(event.xkey.keycode);
-					//fprintf(stderr, "KeyPress event %d --> %d (%c)\n", event.xkey.keycode, wParam, (char) wParam);
+					KeySym sym = XLookupKeysym(&event.xkey, 0);
+					int wParam = GetKey(sym);
+					//fprintf(stderr, "KeyPress event %d --> %d (%c) -> %d\n", event.xkey.keycode, (int) sym, (char) (sym > 27 ? sym : ' '), wParam);
 					keys[wParam] = true;
 				}
 				break;
 
 				case KeyRelease:
 				{
-					int wParam = GetKey(event.xkey.keycode);
-					fprintf(stderr, "KeyRelease event %d -> %d (%c)\n", event.xkey.keycode, wParam, (char) wParam);
+					KeySym sym = XLookupKeysym(&event.xkey, 0);
+					int wParam = GetKey(sym);
+					fprintf(stderr, "KeyRelease event %d -> %d (%c) -> %d\n", event.xkey.keycode, (int) sym, (char) (sym > 27 ? sym : ' '), wParam);
 					HandleKeyRelease(wParam);
 				}
 				break;

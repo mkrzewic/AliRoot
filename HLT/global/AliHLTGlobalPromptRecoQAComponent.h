@@ -189,6 +189,8 @@ protected:
   double femcalRecoSize;
   double femcalTRU;
   double femcalSTU;
+  
+  double fnTRDTracklets;
 
   double fcompressionRatio;
   double fcompressionRatioFull;
@@ -205,6 +207,8 @@ protected:
   long long int fTotalClusters;
   long long int fTotalCompressedBytes;
 
+  double fITSSPDvertexZ;
+
   //Fixed histograms with track / cluster properties.
   //These are not created dynamically because that would require quite some CPU resources.
   TH1D* fHistClusterChargeTot;
@@ -216,6 +220,8 @@ protected:
   TH2F* fHistTPCCallClustersRowPhi;
   TH2F* fHistDeDxOffline;
   TH2F* fHistDeDxNew[10];
+  TH1D* fHistTRDHCId;
+  TH1D* fHistTPCClusterFlags;
 
   ClassDef(AliHLTGlobalPromptRecoQAComponent, 0)
 };

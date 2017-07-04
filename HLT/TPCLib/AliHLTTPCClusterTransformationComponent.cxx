@@ -60,6 +60,7 @@ fInitializeByObjectInDoEvent(0),
 fInitialized(0),
 fTPCPresent(0),
 fIsMC(0),
+fUseOrigTransform(0),
 fBenchmark("ClusterTransformation")
 {
   // see header file for class documentation
@@ -138,7 +139,11 @@ int AliHLTTPCClusterTransformationComponent::DoInit( int argc, const char** argv
   if (iResult>=0 && argc>0)
     iResult=ConfigureFromArgumentString(argc, argv);
     
-  if (AliHLTTPCFastTransform::GetUseOrigTransform()) fOfflineMode = 1;
+  if (fUseOrigTransform)
+  {
+    fOfflineMode = 1;
+    fInitializeByObjectInDoEvent = 0;
+  }
 
   AliTPCcalibDB *calib=AliTPCcalibDB::Instance();  
   if(!calib){
@@ -152,11 +157,11 @@ int AliHLTTPCClusterTransformationComponent::DoInit( int argc, const char** argv
     TStopwatch timer;
     timer.Start();
     int err = 0;
-    if ( fInitializeByObjectInDoEvent == 1 ) {
+    if ( fInitializeByObjectInDoEvent == 1 ) {//Only if equal to 1!
           HLTInfo( "Cluster Transformation will initialize on the fly in DoEvent loop via FastTransformation Data Object, skipping initialization." );
     }
     else if( fOfflineMode ) {
-      err = fgTransform.Init( GetBz(), GetTimeStamp(), fIsMC );
+      err = fgTransform.Init( GetBz(), GetTimeStamp(), fIsMC, fUseOrigTransform );
 	  fInitialized = true;
     } else {
        const char* defaultNotify = "";
@@ -231,6 +236,10 @@ int AliHLTTPCClusterTransformationComponent::ScanConfigurationArgument(int argc,
       fIsMC = 1;
       HLTDebug("Processing Monte Carlo Data.");
       iRet++;
+  } else if (argument.CompareTo("-use-orig-transform")==0){
+      fUseOrigTransform = 1;
+      HLTInfo("Running unmodified original TPC transformation.");
+      iRet++;
     } else {
       iRet = -EINVAL;
       HLTError("Unknown argument %s",argv[i]);     
@@ -295,6 +304,17 @@ int AliHLTTPCClusterTransformationComponent::DoEvent(const AliHLTComponentEventD
 
   fBenchmark.StartNewEvent();
   fBenchmark.Start(0);
+  
+  if( fOfflineMode && !fInitializeByObjectInDoEvent )
+  {
+    Long_t eventTimeStamp = GetTimeStamp();
+    int err = fgTransform.SetCurrentTimeStamp( eventTimeStamp );
+    if (err != 0)
+    {
+      HLTError(Form("Cannot set time stamp, AliHLTTPCClusterTransformation returns %d",err));
+      return(-ENOENT);
+    }
+  }
 
   for( unsigned long ndx=0; ndx<evtData.fBlockCnt; ndx++ ){
     

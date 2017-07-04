@@ -23,7 +23,7 @@
 
 #include <string>
 #include <map>
-#include "TString.h"
+#include "TMessage.h"
 #include <inttypes.h>
 struct zmq_msg_t;
 class TVirtualStreamerInfo;
@@ -81,10 +81,15 @@ int alizmq_msg_copy(aliZMQmsg* dst, aliZMQmsg* src);
 int alizmq_msg_send(aliZMQmsg* message, void* socket, int flags);
 int alizmq_msg_close(aliZMQmsg* message);
 
-//ROOT streamers
+//ROOT streamers utilities
+//add streamers to a message
 int alizmq_msg_prepend_streamer_infos(aliZMQmsg* message, aliZMQrootStreamerInfo* streamers);
+//initialize ROOT internals with the incoming streamers so the objects can be decoded
 int alizmq_msg_iter_init_streamer_infos(aliZMQmsg::iterator it);
-void alizmq_update_streamerlist(aliZMQrootStreamerInfo* streamers, const TObjArray* newStreamers);
+//add new and unique streamers to the list based on the output of the ROOT serializer (newStreamers)
+void alizmq_update_streamerlist(aliZMQrootStreamerInfo* streamers, const TCollection* newStreamers);
+//this one is slow, use only for init kind of stuff
+void alizmq_update_streamerlist_from_object(aliZMQrootStreamerInfo* streamers, TObject* object);
 
 //checking identity of the frame via iterator
 int alizmq_msg_iter_check(aliZMQmsg::iterator it, const DataTopic& topic);
@@ -117,6 +122,10 @@ const int kDataTypeTopicSize = kDataTypefIDsize+kDataTypefOriginSize;
 bool Topicncmp(const char* topic, const char* reference, int topicSize=kDataTypeTopicSize, int referenceSize=kDataTypeTopicSize);
 ULong64_t CharArr2uint32(const char* str);
 ULong64_t CharArr2uint64(const char* str);
+
+//helper function to print a hex/ASCII dump of some memory
+void hexDump (const char* desc, const void* addr, int len);
+void hexDump (aliZMQmsg* message, size_t maxsize=16);
 
 struct BaseDataTopic
 {
@@ -221,25 +230,23 @@ struct DataTopic : public BaseDataTopic
 };
 
 //common data type definitions, compatible with AliHLTDataTypes v25
-const DataTopic kDataTypeStreamerInfos("ROOTSTRI","***\n",0);
-const DataTopic kDataTypeInfo("INFO____","***\n",0);
-const DataTopic kDataTypeConfig("CONFIG__","***\n",0);
-const DataTopic kDataTypeTObject("ROOTTOBJ","***\n",0);
-const DataTopic kDataTypeTH1("ROOTHIST","***\n",0);
+extern const DataTopic kDataTypeStreamerInfos;
+extern const DataTopic kDataTypeInfo;
+extern const DataTopic kDataTypeConfig;
+extern const DataTopic kDataTypeTObject;
+extern const DataTopic kDataTypeTH1;
 
 extern const ULong64_t kSerializationROOT;
+extern const ULong64_t kSerializationNONE;
 
 //a general utility to tokenize strings
 std::vector<std::string> TokenizeString(const std::string input, const std::string delimiters);
-//parse 
+//parse
 stringMap ParseParamString(const std::string paramString);
 std::string GetParamString(const std::string param, const std::string paramstring);
 
 //load ROOT libraries specified in comma separated string
 int LoadROOTlibs(std::string libstring, bool verbose=false);
-
-//helper function to print a hex/ASCII dump of some memory
-void hexDump (const char* desc, void* addr, int len);
 
 //______________________________________________________________________________
 inline ULong64_t CharArr2uint64(const char* str)
@@ -255,6 +262,7 @@ inline ULong64_t CharArr2uint64(const char* str)
           : 0)) : 0)) : 0)) : 0)) : 0)) : 0)) : 0));
 }
 
+//______________________________________________________________________________
 inline ULong64_t CharArr2uint32(const char* str)
 {
 	return((UInt_t) str[0] |
@@ -263,6 +271,31 @@ inline ULong64_t CharArr2uint32(const char* str)
          (str[2] ? ((UInt_t) str[3] << 24)
           : 0)) : 0)) : 0));
 }
+
+//______________________________________________________________________________
+class ZMQTMessage : public TMessage {
+  public:
+    ZMQTMessage(UInt_t what = kMESS_ANY, Int_t bufsiz = TBuffer::kInitialSize) : TMessage(what,bufsiz) {}
+    ZMQTMessage(void* buf, Int_t len) : TMessage(buf, len) {ResetBit(kIsOwner);}
+    static TObject* Extract(const void* pBuffer, unsigned bufferSize, unsigned verbosity=0);
+    static ZMQTMessage* Stream(TObject* pSrc, Int_t compression, unsigned verbosity=0, bool enableSchema=kFALSE);
+#ifdef AliZMQhelpers_AliHLTMessageFormat
+    void SetLength() const
+    {
+      // Set the message length at the beginning of the message buffer a la AliHLTMessage
+      // using native byte order (little endian on x86)
+      if (IsWriting()) {
+        char *buf = Buffer();
+        *((UInt_t*)buf) = (UInt_t)(Length() - sizeof(UInt_t));
+
+        if (CompBuffer()) {
+          buf = CompBuffer();
+          *((UInt_t*)buf) = (UInt_t)(CompLength() - sizeof(UInt_t));
+        }
+      }
+    }
+#endif
+};
 
 }  //end namespace AliZMQhelpers
 
