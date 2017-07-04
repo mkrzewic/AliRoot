@@ -67,6 +67,8 @@
 #include "AliHLTEMCALDefinitions.h"
 #include "AliHLTTPCHWCFData.h"
 #include "AliHLTTPCdEdxData.h"
+#include "AliHLTTRDDefinitions.h"
+#include "AliHLTTRDTrackletWord.h"
 #include "AliGRPManager.h"
 #include "AliGRPObject.h"
 #include "TMath.h"
@@ -144,6 +146,7 @@ AliHLTGlobalPromptRecoQAComponent::AliHLTGlobalPromptRecoQAComponent()
   , femcalRecoSize(0.)
   , femcalTRU(0.)
   , femcalSTU(0.)
+  , fnTRDTracklets(0.)
   , fcompressionRatio(0.)
   , fcompressionRatioFull(0.)
   , fnESDSize(0.)
@@ -163,6 +166,8 @@ AliHLTGlobalPromptRecoQAComponent::AliHLTGlobalPromptRecoQAComponent()
   , fHistTPCCattachedClustersRowPhi(NULL)
   , fHistTPCCallClustersRowPhi(NULL)
   , fHistDeDxOffline(NULL)
+  , fHistTRDHCId(NULL)
+  , fHistTPCClusterFlags(NULL)
 {
   for (int i = 0;i < 10;i++) fHistDeDxNew[i] = NULL;
 }
@@ -292,6 +297,8 @@ void AliHLTGlobalPromptRecoQAComponent::GetInputDataTypes(AliHLTComponentDataTyp
   list.push_back(AliHLTTPCDefinitions::ClustersXYZDataType());
 
   list.push_back(AliHLTTPCDefinitions::fgkRawClustersDataType | kAliHLTDataOriginTPC); //Non-transformed HLT-TPC clusters
+
+  list.push_back(AliHLTTRDDefinitions::fgkTRDTrackletDataType); //TRD Tracklets
 
   list.push_back(AliHLTTPCCADefinitions::fgkTrackletsDataType); //HLT-TPC Tracklets (before TPC global merger)
   list.push_back(kAliHLTDataTypeTrack | kAliHLTDataOriginTPC); //HLT-TPC merged tracks
@@ -424,6 +431,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoInit(int argc, const char** argv)
     fAxes["nFlatESDFriendSize"].set( 100, 0., 1., &fnFlatESDFriendSize );
     fAxes["nHLTInSize"].set( 100, 0., 200e6, &fnHLTInSize );
     fAxes["nHLTOutSize"].set( 100, 0., 70e6, &fnHLTOutSize );
+    fAxes["nTRDTracklets"].set( 100, 0., 100e3, &fnTRDTracklets );
   }//End Axes for Pb-Pb
   else if (mgr.GetGRPData()->GetBeamType() == "p-Pb" ||
       mgr.GetGRPData()->GetBeamType() == "pPb" ||
@@ -473,6 +481,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoInit(int argc, const char** argv)
     fAxes["nFlatESDFriendSize"].set( 100, 0., 1., &fnFlatESDFriendSize );
     fAxes["nHLTInSize"].set( 100, 0., 40e6, &fnHLTInSize );
     fAxes["nHLTOutSize"].set( 100, 0., 10e6, &fnHLTOutSize );
+    fAxes["nTRDTracklets"].set( 100, 0., 50e3, &fnTRDTracklets );
   }//End Axes for p-Pb
   else
   {//Start Axes for pp
@@ -519,6 +528,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoInit(int argc, const char** argv)
     fAxes["nFlatESDFriendSize"].set( 100, 0., 1., &fnFlatESDFriendSize );
     fAxes["nHLTInSize"].set( 100, 0., 40e6, &fnHLTInSize );
     fAxes["nHLTOutSize"].set( 100, 0., 10e6, &fnHLTOutSize );
+    fAxes["nTRDTracklets"].set( 100, 0., 10e3, &fnTRDTracklets );
   }//End Axes for pp
 
   //Start Common Axes
@@ -534,8 +544,10 @@ int AliHLTGlobalPromptRecoQAComponent::DoInit(int argc, const char** argv)
   fAxes["tpcClusterChargeMax"].set( 100, 0, 199, &fakePtr );
   fAxes["phiAngles"].set(180, 0., TMath::TwoPi(), &fakePtr, "phi(rad)");
   fAxes["tpcPadRows"].set(159, 0., 159., &fakePtr, "padrow" );
-  fAxes["tpcTrackP"].set( 100, 0.05, 5., &fakePtr );
-  fAxes["dEdx"].set( 100, 0., 3000., &fakePtr );
+  fAxes["tpcTrackP"].set( 300, 0.05, 10., &fakePtr );
+  fAxes["dEdx"].set( 300, 10., 3000., &fakePtr );
+  fAxes["tpcClusterFlags"].set( 8, 0, 7, &fakePtr );
+  fAxes["trdHCId"].set( 1080, 0, 1079, &fakePtr );
 
   //Start Histograms
   NewHistogram(",fHistSPDclusters_SPDrawSize,SPD clusters vs SPD raw size,rawSizeSPD,nClustersSPD");
@@ -553,6 +565,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoInit(int argc, const char** argv)
   NewHistogram(",fHistTPCHLTclusters_TPCFullCompressionRatio,Full compression ratio vs TPC HLT clusters,nClustersTPC,compressionRatioFull");
   NewHistogram(",fHistTPCHLTclusters_TPCSplitClusterRatioPad,TPC Split Cluster ratio pad vs TPC HLT clusters,nClustersTPC,tpcSplitRatioPad");
   NewHistogram(",fHistTPCHLTclusters_TPCSplitClusterRatioTime,TPC Split Cluster ratio time vs TPC HLT clusters,nClustersTPC,tpcSplitRatioTime");
+  NewHistogram(",fHistTPCHLTclusters_TRDTracklets,TRD Tracklets vs TPC HLT clusters,nClustersTPC,nTRDTracklets");
   NewHistogram(",fHistHLTInSize_HLTOutSize,HLT Out Size vs HLT In Size,nHLTInSize,nHLTOutSize");
   NewHistogram(",fHistHLTSize_HLTInOutRatio,HLT Out/In Size Ratio vs HLT Input Size,nHLTInSize,hltRatio");
   NewHistogram(",fHistZNA_VZEROTrigChargeA,ZNA vs. VZERO Trigger Charge A,vZEROTriggerChargeA,zdcZNA");
@@ -597,8 +610,25 @@ void AliHLTGlobalPromptRecoQAComponent::DeleteFixedHistograms()
   delete fHistTPCCallClustersRowPhi; fHistTPCCallClustersRowPhi=NULL;
   delete fHistTPCCattachedClustersRowPhi; fHistTPCCattachedClustersRowPhi=NULL;
   delete fHistDeDxOffline; fHistDeDxOffline = NULL;
+  delete fHistTPCClusterFlags; fHistTPCClusterFlags = NULL;
+  delete fHistTRDHCId; fHistTRDHCId = NULL;
   for (int i = 0;i < 10;i++) {delete fHistDeDxNew[i];fHistDeDxNew[i] = NULL;}
 }
+
+static void ReBinLogX(TAxis* axis)
+{
+  int bins = axis->GetNbins();
+  Axis_t from = TMath::Log10(axis->GetXmin());
+  Axis_t to = TMath::Log10(axis->GetXmax());
+  Axis_t width = (to - from) / bins;
+  Axis_t *new_bins = new Axis_t[bins + 1];
+  for (int i = 0; i <= bins; i++)
+  {
+    new_bins[i] = TMath::Power(10, from + i * width);
+  }
+  axis->Set(bins, new_bins);
+  delete new_bins;
+} 
 
 //__________________________________________________________________________________________________
 void AliHLTGlobalPromptRecoQAComponent::CreateFixedHistograms()
@@ -621,6 +651,20 @@ void AliHLTGlobalPromptRecoQAComponent::CreateFixedHistograms()
     fHistTPCTrackPt = new TH1D("fHistTPCTrackPt", "TPC Track Pt",
         axisTrackPt.bins, axisTrackPt.low, axisTrackPt.high );
   }
+
+  //tpc cluster flags
+  axisStruct& axisClusterFlags = fAxes["tpcClusterFlags"];
+  if (axisClusterFlags.bins>0) {
+    fHistTPCClusterFlags = new TH1D("fHistTPCClusterFlags", "TPC Cluster Flags",
+        axisClusterFlags.bins, axisClusterFlags.low, axisClusterFlags.high );
+  }
+  
+  //trd half chamber id
+  axisStruct& axisTRDHCId = fAxes["trdHCId"];
+  if (axisTRDHCId.bins>0) {
+    fHistTRDHCId = new TH1D("fHistTRDHCId", "TRD HC Id",
+        axisTRDHCId.bins, axisTRDHCId.low, axisTRDHCId.high );
+  }
   
   //dE/dx
   axisStruct& axisTrackP = fAxes["tpcTrackP"];
@@ -628,12 +672,17 @@ void AliHLTGlobalPromptRecoQAComponent::CreateFixedHistograms()
   if (axisTrackP.bins > 0 && axisDeDx.bins > 0)
   {
     fHistDeDxOffline = new TH2F("fHistTPCdEdxOffline", "TPC dE/dx v.s. P", axisTrackP.bins, axisTrackP.low, axisTrackP.high, axisDeDx.bins, axisDeDx.low, axisDeDx.high);
+    ReBinLogX(fHistDeDxOffline->GetXaxis());
+    ReBinLogX(fHistDeDxOffline->GetYaxis());
+
     const char* tmpNames[10] = {"fHistTPCdEdxTotIROC", "fHistTPCdEdxTotOROC1", "fHistTPCdEdxTotOROC2", "fHistTPCdEdxTotOROCAll", "fHistTPCdEdxTotTPCAll", "fHistTPCdEdxMaxIROC", "fHistTPCdEdxMaxOROC1", "fHistTPCdEdxMaxOROC2", "fHistTPCdEdxMaxOROCAll", "fHistTPCdEdxMaxTPCAll"};
     const char* tmpTitles[10] = {"TPC dE/dx v.s. P (qTot, IROC)", "TPC dE/dx v.s. P (qTot, OROC1)", "TPC dE/dx v.s. P (qTot, OROC2)", "TPC dE/dx v.s. P (qTot, OROC all)", "TPC dE/dx v.s. P (qTot, full TPC)",
                              "TPC dE/dx v.s. P (qMax, IROC)", "TPC dE/dx v.s. P (qMax, OROC1)", "TPC dE/dx v.s. P (qMax, OROC2)", "TPC dE/dx v.s. P (qMax, OROC all)", "TPC dE/dx v.s. P (qMax, full TPC)"};
     for (int i = 0;i < 10;i++)
     {
       fHistDeDxNew[i] = new TH2F(tmpNames[i], tmpTitles[i], axisTrackP.bins, axisTrackP.low, axisTrackP.high, axisDeDx.bins, axisDeDx.low, axisDeDx.high);
+      ReBinLogX(fHistDeDxNew[i]->GetXaxis());
+      ReBinLogX(fHistDeDxNew[i]->GetYaxis());
     }
   }
 
@@ -957,6 +1006,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
   AliHLTUInt32_t nTPCtracks = 0;
   AliHLTUInt32_t nITSTracks = 0;
   AliHLTUInt32_t nITSOutTracks = 0;
+  AliHLTUInt32_t nTRDTracklets = 0;
 
   AliHLTUInt32_t nTPCHitsSplitPad = 0;
   AliHLTUInt32_t nTPCHitsSplitTime = 0;
@@ -1266,7 +1316,6 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
       rawSizeMUTG += iter->fSize;
     }
 
-
     //numbers of tracks
     if (iter->fDataType == AliHLTTPCCADefinitions::fgkTrackletsDataType) //HLT-TPC CA-trackets (before TPC global merger)
     {
@@ -1292,6 +1341,21 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
     {
       AliHLTITSSAPTrackerDataContainer* inPtr = reinterpret_cast<AliHLTITSSAPTrackerDataContainer*>(iter->fPtr);
       nITSSAPtracks += inPtr->fCount;
+    }
+
+    //TRD Tracklets
+    if (iter->fDataType == AliHLTTRDDefinitions::fgkTRDTrackletDataType)
+    {
+      AliHLTTRDTrackletWord* tracklets = reinterpret_cast<AliHLTTRDTrackletWord*>( iter->fPtr );
+      int nTRDTrackletsTotal = iter->fSize / sizeof(AliHLTTRDTrackletWord);
+      nTRDTracklets += nTRDTrackletsTotal;
+      if (fHistTRDHCId)
+      {
+        for (int i = 0;i < nTRDTracklets;i++)
+        {
+          fHistTRDHCId->Fill(tracklets[i].GetHCId());
+        }
+      }
     }
 
     if (fScaleDownClusterAttachHistos != 0 && nEvents % fScaleDownClusterAttachHistos == 0)
@@ -1362,7 +1426,8 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
         {
           for (int j = 0;j < 10;j++)
           {
-            float val = dEdxInfo->fdEdxInfo[i * dEdxInfo->fValuesPerTrack + j];
+            AliHLTTPCdEdxInfo* info = &dEdxInfo->fdEdxInfo[i];
+            float val = ((float*) info)[j];
             if (val > 0.) fHistDeDxNew[j]->Fill(trackP, val);
           }
         }
@@ -1379,6 +1444,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
         AliHLTTPCRawCluster& cluster = clusters->fClusters[i];
         if (fHistClusterChargeTot) fHistClusterChargeTot->Fill(cluster.GetCharge());
         if (fHistClusterChargeMax) fHistClusterChargeMax->Fill(cluster.GetQMax());
+        if (fHistTPCClusterFlags) fHistTPCClusterFlags->Fill(cluster.GetFlags());
         nTPCHitsSplitPad += cluster.GetFlagSplitPad();
         nTPCHitsSplitTime += cluster.GetFlagSplitTime();
       }
@@ -1482,6 +1548,12 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
   }
 
   //push fixed histograms
+  if (fHistTRDHCId && fHistTRDHCId->GetEntries() && PushBack(fHistTRDHCId, kAliHLTDataTypeHistogram|kAliHLTDataOriginHLT)>0) {
+    if (fResetAfterPush) fHistTRDHCId->Reset();
+  }
+  if (fHistTPCClusterFlags && fHistTPCClusterFlags->GetEntries() && PushBack(fHistTPCClusterFlags, kAliHLTDataTypeHistogram|kAliHLTDataOriginHLT)>0) {
+    if (fResetAfterPush) fHistTPCClusterFlags->Reset();
+  }
   if (fHistDeDxOffline && fHistDeDxOffline->GetEntries() && PushBack(fHistDeDxOffline, kAliHLTDataTypeHistogram|kAliHLTDataOriginHLT)>0) {
     if (fResetAfterPush) fHistDeDxOffline->Reset();
   }
@@ -1569,6 +1641,7 @@ int AliHLTGlobalPromptRecoQAComponent::DoEvent( const AliHLTComponentEventData& 
   fnFlatESDFriendSize = nFlatESDFriendSize;
   fnHLTInSize = nHLTInSize;
   fnHLTOutSize = nHLTOutSize;
+  fnTRDTracklets = nTRDTracklets;
   
   fTotalClusters += nClustersTPC;
   fTotalCompressedBytes += compressedSizeTPC;

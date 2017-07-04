@@ -999,13 +999,17 @@ TObjArray  * AliTreePlayer::MakeHistograms(TTree * tree, TString hisString, TStr
 	    }
 	  }
 	  if (xMax[iDim]<=xMin[iDim]){
-	    ::Error("xxx","Invalid range specification %s\t%s",descriptionArray->At(3*iDim+2)->GetName(), descriptionArray->At(3*iDim+3)->GetName() );
+	    ::Error("AliTreePlayer::MakeHistograms","Invalid hstogram range specification for histogram  %s: %s\t%s",hisDescription.Data(), \
+		    descriptionArray->At(3*iDim+2)->GetName(), descriptionArray->At(3*iDim+3)->GetName() );
 	  }
 	}
 	THnF * phis = new THnF(hName.Data(),hName.Data(), hisDims[iHis],nBins, xMin,xMax);
 	hisArray->AddAt(phis,iHis);
 	for (Int_t iDim=0;iDim<hisDims[iHis]; iDim++){
-	  phis->GetAxis(iDim)->SetTitle(varArray->At(iDim)->GetName());
+	  phis->GetAxis(iDim)->SetName(varArray->At(iDim)->GetName());	  
+	  phis->GetAxis(iDim)->SetTitle(varArray->At(iDim)->GetName());	  
+	  TNamed *axisTitle=TStatToolkit::GetMetadata(tree,TString::Format("%s.AxisTitle",varArray->At(iDim)->GetName()).Data());
+	  if (axisTitle)  phis->GetAxis(iDim)->SetTitle(axisTitle->GetTitle());	
 	}
       }      
     }
