@@ -639,7 +639,7 @@ AliMagF* AliMagF::CreateFieldMap(Float_t l3Cur, Float_t diCur, Int_t convention,
   }
   if (a2z<0) {
     if (btype == kBeamTypeAA) { // relevant only for ion beams
-      AliWarningClassF("Beam is A-A but supplied AZ records are %d %d, PbPb is assumed",az0,az1);
+      //AliWarningClassF("Beam is A-A but supplied AZ records are %d %d, PbPb is assumed",az0,az1);
       a2z = 208./82.;
     }
     else {
