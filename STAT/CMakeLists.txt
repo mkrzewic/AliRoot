@@ -17,6 +17,8 @@
 set(MODULE STAT)
 add_definitions(-D_MODULE_="${MODULE}")
 
+add_subdirectory(test)
+
 # Module include folders
 include_directories(${AliRoot_SOURCE_DIR}/${MODULE})
 
@@ -40,6 +42,7 @@ set(SRCS
     AliTreeTrending.cxx
     AliNDFormulaBrowser.cxx
     AliDrawStyle.cxx
+        AliPainter.cxx
     AliElasticSearchRoot.cxx)
 
 # Dependencies (libraries)

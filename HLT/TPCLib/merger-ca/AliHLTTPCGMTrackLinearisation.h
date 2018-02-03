@@ -48,6 +48,13 @@ class AliHLTTPCGMTrackLinearisation
     GPUd() float& DzDs()   { return fDzDs; }
     GPUd() float& DlDs()   { return fDlDs; }
     GPUd() float& QPt()    { return fQPt; }
+    
+    GPUd() float GetSinPhi() const { return fSinPhi; }
+    GPUd() float GetCosPhi() const { return fCosPhi; }
+    GPUd() float GetSecPhi() const { return fSecPhi; }
+    GPUd() float GetDzDs()   const { return fDzDs; }
+    GPUd() float GetDlDs()   const { return fDlDs; }
+    GPUd() float GetQPt()    const { return fQPt; }
 
 
  private:
@@ -63,8 +70,8 @@ class AliHLTTPCGMTrackLinearisation
  GPUd() inline AliHLTTPCGMTrackLinearisation::AliHLTTPCGMTrackLinearisation( const AliHLTTPCGMTrackParam &t )
     : fSinPhi( t.GetSinPhi() ), fCosPhi( 0. ), fSecPhi( 0. ), fDzDs( t.GetDzDs() ), fDlDs( 0. ), fQPt( t.GetQPt() )
 {
-  fSinPhi = AliHLTTPCCAMath::Min( fSinPhi,  .999f );
-  fSinPhi = AliHLTTPCCAMath::Max( fSinPhi, -.999f );
+  fSinPhi = AliHLTTPCCAMath::Min( fSinPhi,  HLTCA_MAX_SIN_PHI );
+  fSinPhi = AliHLTTPCCAMath::Max( fSinPhi, -HLTCA_MAX_SIN_PHI );
   fCosPhi = sqrt( 1. - fSinPhi * fSinPhi );
   fSecPhi = 1./fCosPhi; //reciprocal(fCosPhi);
   fDlDs = sqrt(1.+fDzDs*fDzDs);

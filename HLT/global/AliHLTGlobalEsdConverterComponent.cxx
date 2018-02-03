@@ -73,6 +73,10 @@
 #include "AliHLTTRDTrackData.h"
 #include "AliHLTTRDTrackPoint.h"
 #include "AliHLTITSTrackPoint.h"
+#include "AliGRPManager.h"
+#include "AliGRPObject.h"
+#include "AliHLTTPCdEdxData.h"
+#include "AliTPCdEdxInfo.h"
 
 /** ROOT macro for the implementation of ROOT specific class methods */
 ClassImp(AliHLTGlobalEsdConverterComponent)
@@ -86,6 +90,7 @@ AliHLTGlobalEsdConverterComponent::AliHLTGlobalEsdConverterComponent()
   , fScaleDownTracks(0)
   , fSolenoidBz(-5.00668)
   , fMakeFriends(0)
+  , fBeamTypePbPb(false)
   , fBenchmark("EsdConverter")
 {
   // see header file for class documentation
@@ -123,6 +128,7 @@ void AliHLTGlobalEsdConverterComponent::GetInputDataTypes(AliHLTComponentDataTyp
   list.push_back(kAliHLTDataTypeCaloCluster);
   list.push_back(kAliHLTDataTypeCaloTrigger);
   list.push_back(kAliHLTDataTypedEdx);
+  list.push_back(AliHLTTPCDefinitions::TPCdEdxNew());
   list.push_back(kAliHLTDataTypeESDVertex);
   list.push_back(kAliHLTDataTypeESDObject);
   list.push_back(kAliHLTDataTypeTObject);
@@ -140,6 +146,7 @@ void AliHLTGlobalEsdConverterComponent::GetInputDataTypes(AliHLTComponentDataTyp
   list.push_back(AliHLTTRDDefinitions::fgkTRDTrackPointDataType);
   list.push_back(kAliHLTDataTypeITSTrackPoint|kAliHLTDataOriginITS);
   list.push_back(kAliHLTDataTypeITSSAPTrackPoint|kAliHLTDataOriginITS);
+  list.push_back( AliHLTTPCDefinitions::TracksDataType() | kAliHLTDataOriginTPC );
 }
 
 AliHLTComponentDataType AliHLTGlobalEsdConverterComponent::GetOutputDataType()
@@ -283,6 +290,17 @@ int AliHLTGlobalEsdConverterComponent::DoInit(int argc, const char** argv)
   
   if( iResult>=0 && fMakeFriends ){
     fESDfriend = new AliESDfriend();
+  }
+  
+  AliGRPManager mgr;
+  mgr.ReadGRPEntry();
+
+  if (mgr.GetGRPData()->GetBeamType() == "Pb-Pb" ||
+      mgr.GetGRPData()->GetBeamType() == "PbPb" ||
+      mgr.GetGRPData()->GetBeamType() == "A-A" ||
+      mgr.GetGRPData()->GetBeamType() == "AA" )
+  {
+    fBeamTypePbPb = true;
   }
 
   fBenchmark.SetTimer(0,"total");
@@ -664,15 +682,31 @@ int AliHLTGlobalEsdConverterComponent::ProcessBlocks(TTree* pTree, AliESDEvent* 
 
   AliHLTFloat32_t *dEdxTPC = 0; 
   Int_t ndEdxTPC = 0;
+  AliHLTTPCdEdxData* dEdxInfo = NULL;
   for (const AliHLTComponentBlockData* pBlock=GetFirstInputBlock(kAliHLTDataTypedEdx|kAliHLTDataOriginTPC);
-       pBlock!=NULL; pBlock=NULL/*GetNextInputBlock() there is only one block*/) {
+    pBlock!=NULL; pBlock=NULL/*GetNextInputBlock() there is only one block*/) {
     fBenchmark.AddInput(pBlock->fSize);
     dEdxTPC = reinterpret_cast<AliHLTFloat32_t*>( pBlock->fPtr );
     ndEdxTPC = pBlock->fSize / (3*sizeof(AliHLTFloat32_t));
   }
-
+  
+  for (const AliHLTComponentBlockData* pBlock=GetFirstInputBlock(AliHLTTPCDefinitions::TPCdEdxNew());
+    pBlock!=NULL; pBlock=NULL/*GetNextInputBlock() there is only one block*/) {
+    fBenchmark.AddInput(pBlock->fSize);
+    dEdxInfo = (AliHLTTPCdEdxData*) pBlock->fPtr;
+  }
   
   std::map<int,int> mapTpcId2esdId;
+  
+  const AliHLTTracksData* tpcTrackOuterParam = NULL;
+  for (const AliHLTComponentBlockData* pBlock=GetFirstInputBlock(AliHLTTPCDefinitions::TracksDataType()|kAliHLTDataOriginTPC); pBlock!=NULL; pBlock=GetNextInputBlock()) {
+    if (tpcTrackOuterParam) {
+      HLTWarning("Multiple instances of outer TPC tracks found!!!");
+      tpcTrackOuterParam = NULL;
+      break;
+    }
+    tpcTrackOuterParam = (AliHLTTracksData*) pBlock->fPtr;
+  }
 
   // 2) convert the TPC tracks to ESD tracks
   if (storeTracks) for (const AliHLTComponentBlockData* pBlock=GetFirstInputBlock(kAliHLTDataTypeTrack|kAliHLTDataOriginTPC);
@@ -722,13 +756,21 @@ int AliHLTGlobalEsdConverterComponent::ProcessBlocks(TTree* pTree, AliESDEvent* 
 	// HLT does not provide such standalone tracking
 	AliHLTGlobalBarrelTrack outPar(*element);	  
 	{
-	  //outPar.AliExternalTrackParam::PropagateTo( element->GetLastPointX(), fSolenoidBz );
-	  const Int_t N=10; // number of steps.
-	  const Float_t xRange = element->GetLastPointX() - element->GetX();
-	  const Float_t xStep = xRange / N ;
-	  for(int i = 1; i <= N; ++i) {
-	    if(!outPar.AliExternalTrackParam::PropagateTo(element->GetX() + xStep * i, fSolenoidBz)) break;
-	  }
+      if (tpcTrackOuterParam && tpcTrackOuterParam->fCount > iTrack)
+      {
+        const AliHLTExternalTrackParam& tpcOutTrack = tpcTrackOuterParam->fTracklets[iTrack];
+        float tmp[5] = {tpcOutTrack.fY, tpcOutTrack.fZ, tpcOutTrack.fSinPhi, tpcOutTrack.fTgl, tpcOutTrack.fq1Pt};
+        outPar.Set(tpcOutTrack.fX, tpcOutTrack.fAlpha, tmp, tpcOutTrack.fC);
+      }
+      else
+      {
+        const Int_t N=10; // number of steps.
+        const Float_t xRange = element->GetLastPointX() - element->GetX();
+        const Float_t xStep = xRange / N ;
+        for(int i = 1; i <= N; ++i) { 
+          if(!outPar.AliExternalTrackParam::PropagateTo(element->GetX() + xStep * i, fSolenoidBz)) break;
+        }
+      }
 	  outPar.SetLabel(element->GetLabel());
 	  iotrack.UpdateTrackParams(&outPar,AliESDtrack::kTPCout);
 	}
@@ -741,15 +783,42 @@ int AliHLTGlobalEsdConverterComponent::ProcessBlocks(TTree* pTree, AliESDEvent* 
 	// TPC cluster
 	iotrack.UpdateTrackParams(&(*element),AliESDtrack::kTPCrefit);
 	iotrack.SetTPCPoints(points);
-	if( iTrack < ndEdxTPC ){
+    if (dEdxInfo)
+    {
+      if (dEdxInfo->fCount <= iTrack)
+      {
+        HLTWarning("Wrong number of dEdx TPC info");
+      }
+      else
+      {
+        AliHLTTPCdEdxInfo* info = &dEdxInfo->fdEdxInfo[iTrack];
+        iotrack.SetTPCsignal(fBeamTypePbPb ? info->fdEdxMaxTPC : info ->fdEdxTotTPC, 0, info->nHitsIROC + info->nHitsOROC1 + info->nHitsOROC2);
+        AliTPCdEdxInfo* tpcInfo = new AliTPCdEdxInfo; //will be deleted automatically when iotrack goes out of scope.
+        double signal[4];
+        char clusters[3];
+        char rows[3];
+        signal[0] = info->fdEdxMaxIROC; //We store incorrect qMax in the region and qTot in the qMax region to reproduce incorrect implementation in offline AliTPCdEdxInfo...
+        signal[1] = info->fdEdxMaxOROC1;
+        signal[2] = info->fdEdxMaxOROC2;
+        signal[3] = info->fdEdxMaxOROC;
+        clusters[0] = info->nHitsIROC;
+        clusters[1] = info->nHitsOROC1;
+        clusters[2] = info->nHitsOROC2;
+        rows[0] = info->nHitsSubThresholdIROC;
+        rows[1] = info->nHitsSubThresholdOROC1;
+        rows[2] = info->nHitsSubThresholdOROC2;
+        tpcInfo->SetTPCSignalRegionInfo(signal, clusters, rows);
+        signal[0] = info->fdEdxTotIROC; //We store incorrect qMax in the region and qTot in the qMax region to reproduce incorrect implementation in offline AliTPCdEdxInfo...
+        signal[1] = info->fdEdxTotOROC1;
+        signal[2] = info->fdEdxTotOROC2;
+        signal[3] = info->fdEdxTotOROC;
+        tpcInfo->SetTPCSignalsQmax(signal);
+        iotrack.SetTPCdEdxInfo(tpcInfo);
+      }
+    }
+	else if( iTrack < ndEdxTPC ){
 	  AliHLTFloat32_t *val = &(dEdxTPC[3*iTrack]);
 	  iotrack.SetTPCsignal( val[0], val[1], (UChar_t) val[2] ); 
-	  //AliTPCseed s;
-	  //s.Set( element->GetX(), element->GetAlpha(),
-	  //element->GetParameter(), element->GetCovariance() );
-	  //s.SetdEdx( val[0] );
-	  //s.CookPID();
-	  //iotrack.SetTPCpid(s.TPCrPIDs() );
 	} else {
 	  if( dEdxTPC ) HLTWarning("Wrong number of dEdx TPC labels");
 	}
@@ -815,12 +884,6 @@ int AliHLTGlobalEsdConverterComponent::ProcessBlocks(TTree* pTree, AliESDEvent* 
 
 	  tTPC.SetNumberOfClusters(nClustersSet);
   
-	  // Cook dEdx
-	  
-	  //AliTPCseed *seed = &(tTPC);      
-	  //fSeedArray->AddAt( seed, TMath::Abs(seed->GetLabel()) );
-	  //fdEdx->Fill( seed->P()*seed->Charge(), seed->CookdEdx(0.02, 0.6) );
-
 	  AliESDfriendTrack friendTrack;
 	  friendTrack.AddCalibObject(&tTPC);
 	  friendTrack.SetTPCOut( outPar);
@@ -1001,7 +1064,7 @@ int AliHLTGlobalEsdConverterComponent::ProcessBlocks(TTree* pTree, AliESDEvent* 
 	  // there can be a decay. The ITS label should then be the better one, the
 	  // TPC label is saved in a member of AliESDtrack
 	  if (mcLabel>=0) {
-	    // upadte only if the ITS label is available, otherwise keep TPC label
+	    // update only if the ITS label is available, otherwise keep TPC label
 	    element->SetLabel( mcLabel );
 	  } else {
 	    // bugfix https://savannah.cern.ch/bugs/?69713
@@ -1204,7 +1267,7 @@ int AliHLTGlobalEsdConverterComponent::ProcessBlocks(TTree* pTree, AliESDEvent* 
 	tESD->UpdateTrackParams(&trdTrack,AliESDtrack::kTRDout);
 	tESD->SetStatus(AliESDtrack::kTRDin);
 	tESD->SetTRDpid(TRDpid);
-  tESD->SetTRDntracklets(trdTrack.GetNtracklets() << 3);
+	tESD->SetTRDntracklets(trdTrack.GetNtracklets() << 3);
 
 	if( pESDfriend ) { 
 	  AliESDfriendTrack *friendTrack = pESDfriend->GetTrack(esdID);

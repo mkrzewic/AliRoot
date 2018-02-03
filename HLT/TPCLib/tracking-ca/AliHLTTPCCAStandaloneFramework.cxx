@@ -22,7 +22,10 @@
 #include "AliHLTTPCCAMath.h"
 #include "AliHLTTPCCAClusterData.h"
 #include "AliHLTTPCGeometry.h"
-#include "TStopwatch.h"
+
+#if defined(HLTCA_BUILD_O2_LIB) & defined(HLTCA_STANDALONE)
+#undef HLTCA_STANDALONE //We disable the standalone application features for the O2 lib. This is a hack since the HLTCA_STANDALONE setting is ambigious... In this file it affects standalone application features, in the other files it means independence from aliroot
+#endif
 
 #ifdef HLTCA_STANDALONE
 #include <omp.h>
@@ -36,21 +39,22 @@
 #endif
 #endif
 
-AliHLTTPCCAStandaloneFramework &AliHLTTPCCAStandaloneFramework::Instance()
+AliHLTTPCCAStandaloneFramework &AliHLTTPCCAStandaloneFramework::Instance(int allowGPU, const char* GPULibrary)
 {
   // reference to static object
-  static AliHLTTPCCAStandaloneFramework gAliHLTTPCCAStandaloneFramework;
+  static AliHLTTPCCAStandaloneFramework gAliHLTTPCCAStandaloneFramework(allowGPU, GPULibrary);
   return gAliHLTTPCCAStandaloneFramework;
 }
 
-AliHLTTPCCAStandaloneFramework::AliHLTTPCCAStandaloneFramework()
-: fMerger(), fOutputControl(),
+AliHLTTPCCAStandaloneFramework::AliHLTTPCCAStandaloneFramework(int allowGPU, const char* GPULibrary)
+: fMerger(), fClusterData(fInternalClusterData), fOutputControl(),
+  fTracker(allowGPU, GPULibrary ? GPULibrary : 
 #ifdef HLTCA_STANDALONE
-fTracker(1, getenv("HLTCA_GPUTRACKER_LIBRARY"))
+    getenv("HLTCA_GPUTRACKER_LIBRARY")
 #else
-fTracker(1)
+    NULL
 #endif
-, fStatNEvents( 0 ), fDebugLevel(0), fEventDisplay(0), fRunMerger(1)
+  ), fStatNEvents( 0 ), fDebugLevel(0), fEventDisplay(0), fRunQA(0), fRunMerger(1), fMCLabels(0), fMCInfo(0)
 {
   //* constructor
 
@@ -63,7 +67,7 @@ fTracker(1)
 }
 
 AliHLTTPCCAStandaloneFramework::AliHLTTPCCAStandaloneFramework( const AliHLTTPCCAStandaloneFramework& )
-    : fMerger(), fOutputControl(), fTracker(), fStatNEvents( 0 ), fDebugLevel(0), fEventDisplay(0), fRunMerger(1)
+    : fMerger(), fClusterData(fInternalClusterData), fOutputControl(), fTracker(), fStatNEvents( 0 ), fDebugLevel(0), fEventDisplay(0), fRunQA(0), fRunMerger(1), fMCLabels(0), fMCInfo(0)
 {
   //* dummy
   for ( int i = 0; i < 20; i++ ) {
@@ -97,57 +101,33 @@ void AliHLTTPCCAStandaloneFramework::StartDataReading( int guessForNumberOfClust
   for ( int i = 0; i < fgkNSlices; i++ ) {
     fClusterData[i].StartReading( i, sliceGuess );
   }
+  fMCLabels.clear();
+  fMCInfo.clear();
 }
 
 void AliHLTTPCCAStandaloneFramework::FinishDataReading()
 {
-  // finish reading of the event
-
-  /*static int event_number = 0;
-  char filename[256];
-
-  sprintf(filename, "events/event.%d.dump", event_number);
-  printf("Dumping event into file %s\n", filename);
-  std::ofstream outfile(filename, std::ofstream::binary);
-  if (outfile.fail())
-  {
-    printf("Error opening event dump file\n");
-    exit(1);
-  }
-  WriteEvent(outfile);
-  if (outfile.fail())
-  {
-    printf("Error writing event dump file\n");
-    exit(1);
-  }
-  outfile.close();
-
-  event_number++;*/
-  
-  /*std::ifstream infile(filename, std::ifstream::binary);
-  ReadEvent(infile);
-  infile.close();*/
-
-  for ( int i = 0; i < fgkNSlices; i++ ) {
-    //fClusterData[i].FinishReading();			//No longer needed
-  }
+  //No longer needed
 }
 
 
-int AliHLTTPCCAStandaloneFramework::ProcessEvent(int forceSingleSlice)
+int AliHLTTPCCAStandaloneFramework::ProcessEvent(int forceSingleSlice, bool resetTimers)
 {
   // perform the event reconstruction
 
   fStatNEvents++;
 
-  TStopwatch timer0;
-  TStopwatch timer1;
-
 #ifdef HLTCA_STANDALONE
-  unsigned long long int startTime, endTime, checkTime;
-  unsigned long long int cpuTimers[16], gpuTimers[16], tmpFreq;
-  AliHLTTPCCATracker::StandaloneQueryFreq(&tmpFreq);
-  AliHLTTPCCATracker::StandaloneQueryTime(&startTime);
+  static HighResTimer timerTracking, timerMerger, timerQA;
+  static int nCount = 0;
+  if (resetTimers)
+  {
+      timerTracking.Reset();
+      timerMerger.Reset();
+      timerQA.Reset();
+      nCount = 0;
+  }
+  timerTracking.Start();
 
   if (fEventDisplay)
   {
@@ -168,15 +148,14 @@ int AliHLTTPCCAStandaloneFramework::ProcessEvent(int forceSingleSlice)
   }
 
 #ifdef HLTCA_STANDALONE
-  AliHLTTPCCATracker::StandaloneQueryTime(&endTime);
-  AliHLTTPCCATracker::StandaloneQueryTime(&checkTime);
+  timerTracking.Stop();
 #endif
-
-  timer1.Stop();
-  TStopwatch timer2;
 
   if (fRunMerger)
   {
+#ifdef HLTCA_STANDALONE
+      timerMerger.Start();
+#endif
 	  fMerger.Clear();
 
 	  for ( int i = 0; i < fgkNSlices; i++ ) {
@@ -188,16 +167,20 @@ int AliHLTTPCCAStandaloneFramework::ProcessEvent(int forceSingleSlice)
 	  if (fTracker.GetGPUTracker()->GPUMergerAvailable()) fMerger.SetGPUTracker(fTracker.GetGPUTracker());
 #endif
 	  fMerger.Reconstruct();
+#ifdef HLTCA_STANDALONE
+      timerMerger.Stop();
+#endif
   }
 
-  timer2.Stop();
-  timer0.Stop();
-  
-  fLastTime[0] = timer0.CpuTime();
-  fLastTime[1] = timer1.CpuTime();
-  fLastTime[2] = timer2.CpuTime();
-
 #ifdef HLTCA_STANDALONE
+#ifdef BUILD_QA
+  if (fRunQA)
+  {
+    timerQA.Start();
+    RunQA();
+    timerQA.Stop();
+  }
+#endif
 #ifdef BUILD_EVENT_DISPLAY
   if (fEventDisplay)
   {
@@ -239,8 +222,21 @@ int AliHLTTPCCAStandaloneFramework::ProcessEvent(int forceSingleSlice)
 		usleep(10000);
 #endif
 		iKey = kbhit() ? getch() : 0;
-		if (iKey == 'q') return(2);
-	} while (iKey != 'n' && buttonPressed == 0);
+		if (iKey == 'q') buttonPressed = 2;
+        else if (iKey == 'n') break;
+        else if (iKey)
+        {
+            while (sendKey != 0)
+            {
+                #ifdef R__WIN32
+                		Sleep(1);
+                #else
+                		usleep(1000);
+                #endif                
+            }
+            sendKey = iKey;
+        }
+	} while (buttonPressed == 0);
 	if (buttonPressed == 2) return(2);
 	buttonPressed = 0;
 	printf("Loading next event\n");
@@ -255,43 +251,45 @@ int AliHLTTPCCAStandaloneFramework::ProcessEvent(int forceSingleSlice)
   }
 #endif
 
-  printf("Tracking Time: %lld us\nTime uncertainty: %lld ns\n", (endTime - startTime) * 1000000 / tmpFreq, (checkTime - endTime) * 1000000000 / tmpFreq);
+  nCount++;
+#ifndef HLTCA_BUILD_O2_LIB
+  printf("Tracking Time: %1.0f us\n", 1000000 * timerTracking.GetElapsedTime() / nCount);
+  if (fRunMerger) printf("Merging and Refit Time: %1.0f us\n", 1000000 * timerMerger.GetElapsedTime() / nCount);
+  if (fRunQA) printf("QA Time: %1.0f us\n", 1000000 * timerQA.GetElapsedTime() / nCount);
+#endif
 
   if (fDebugLevel >= 1)
   {
-		const char* tmpNames[16] = {"Initialisation", "Neighbours Finder", "Neighbours Cleaner", "Starts Hits Finder", "Start Hits Sorter", "Weight Cleaner", "Reserved", "Tracklet Constructor", "Tracklet Selector", "Write Output", "Unused", "Unused", "Unused", "Unused", "Unused", "Unused"};
+		const char* tmpNames[10] = {"Initialisation", "Neighbours Finder", "Neighbours Cleaner", "Starts Hits Finder", "Start Hits Sorter", "Weight Cleaner", "Tracklet Constructor", "Tracklet Selector", "Global Tracking", "Write Output"};
 
 		for (int i = 0;i < 10;i++)
 		{
-			if (i == 6) continue;
-			cpuTimers[i] = gpuTimers[i] = 0;
+            double time = 0;
 			for ( int iSlice = 0; iSlice < fgkNSlices;iSlice++)
 			{
 				if (forceSingleSlice != -1) iSlice = forceSingleSlice;
-				cpuTimers[i] += *fTracker.PerfTimer(0, iSlice, i + 1) - *fTracker.PerfTimer(0, iSlice, i);
-				if (forceSingleSlice != -1 || (fTracker.MaxSliceCount() && (iSlice % fTracker.MaxSliceCount() == 0 || i <= 5)))
-					gpuTimers[i] += *fTracker.PerfTimer(1, iSlice, i + 1) - *fTracker.PerfTimer(1, iSlice, i);
+				time += fTracker.GetTimer(iSlice, i);
+                if (!HLTCA_TIMING_SUM) fTracker.ResetTimer(iSlice, i);
 				if (forceSingleSlice != -1) break;
 			}
 			if (forceSingleSlice == -1)
 			{
-				cpuTimers[i] /= fgkNSlices;
-				gpuTimers[i] /= fgkNSlices;
+				time /= fgkNSlices;
 			}
-			cpuTimers[i] *= 1000000;
-			gpuTimers[i] *= 1000000;
-			cpuTimers[i] /= tmpFreq;
-			gpuTimers[i] /= tmpFreq;
-			cpuTimers[i] /= omp_get_max_threads();
+			if (fTracker.GetGPUStatus() < 2) time /= omp_get_max_threads();
 
 			printf("Execution Time: Task: %20s ", tmpNames[i]);
-				printf("CPU: %15lld\t\t", cpuTimers[i]);
-				printf("GPU: %15lld\t\t", gpuTimers[i]);
-			if (fDebugLevel >=6 && gpuTimers[i])
-				printf("Speedup: %4lld%%", cpuTimers[i] * 100 / gpuTimers[i]);
+			printf("Time: %1.0f us", time * 1000000 / nCount);
 			printf("\n");
 		}
-		printf("Execution Time: Task: %20s CPU: %15lld\n", "Merger", (long long int) (timer2.RealTime() * 1000000));
+		printf("Execution Time: Task: %20s Time: %1.0f us\n", "Merger", timerMerger.GetElapsedTime() * 1000000. / nCount);
+        if (!HLTCA_TIMING_SUM)
+        {
+            timerTracking.Reset();
+            timerMerger.Reset();
+            timerQA.Reset();
+            nCount = 0;
+        }
   }
 #endif
 
@@ -301,11 +299,9 @@ int AliHLTTPCCAStandaloneFramework::ProcessEvent(int forceSingleSlice)
 }
 
 
-void AliHLTTPCCAStandaloneFramework::SetSettings( )
+void AliHLTTPCCAStandaloneFramework::SetSettings(float solenoidBz, bool toyMCEvents, bool constBz)
 {
-	float solenoidBz = -5.00668;
-	
-	for (int slice = 0;slice < fgkNSlices;slice++)
+    for (int slice = 0;slice < fgkNSlices;slice++)
     {
       int iSec = slice;
       float inRmin = 83.65;
@@ -315,7 +311,10 @@ void AliHLTTPCCAStandaloneFramework::SetSettings( )
       float minusZmin = -249.645;
       float minusZmax = -0.0799937;
       float dalpha = 0.349066;
-      float alpha = 0.174533 + dalpha * iSec;
+      int tmp = iSec;
+      if (tmp >= 18) tmp -= 18;
+      if (tmp >= 9) tmp -= 18;
+      float alpha = 0.174533 + dalpha * tmp;
 
       bool zPlus = ( iSec < 18 );
       float zMin =  zPlus ? plusZmin : minusZmin;
@@ -336,7 +335,7 @@ void AliHLTTPCCAStandaloneFramework::SetSettings( )
         inRmin, outRmax, zMin, zMax, padPitch, sigmaZ, solenoidBz );
       param.SetHitPickUpFactor( 2 );
       param.SetMinNTrackClusters( -1 );
-      param.SetMinTrackPt( 0.015 );
+      param.SetMinTrackPt( MIN_TRACK_PT_DEFAULT );
 
       param.Update();
       fTracker.InitializeSliceParam( slice, param );
@@ -352,7 +351,7 @@ void AliHLTTPCCAStandaloneFramework::SetSettings( )
 	  float plusZmin = 0.0529937;
 	  float plusZmax = 249.778;
 	  float dalpha = 0.349066;
-	  float alpha = 0.174533 + dalpha * iSec;
+	  float alpha = 0.174533;
 	  float zMin =  plusZmin;
 	  float zMax =  plusZmax;
 	  int nRows = HLTCA_ROW_COUNT;
@@ -365,7 +364,8 @@ void AliHLTTPCCAStandaloneFramework::SetSettings( )
 
 	  param.Initialize( iSec, nRows, rowX, alpha, dalpha,
 						inRmin, outRmax, zMin, zMax, padPitch, sigmaZ, solenoidBz );
-
+	  param.SetAssumeConstantBz(constBz);
+	  param.SetToyMCEventsFlag( toyMCEvents );
 	  param.SetClusterError2CorrectionZ( 1.1 );
 	  param.Update();
 
@@ -384,41 +384,127 @@ void AliHLTTPCCAStandaloneFramework::WriteEvent( std::ostream &out ) const
   }
 }
 
-void AliHLTTPCCAStandaloneFramework::ReadEvent( std::istream &in, bool resetIds )
+int AliHLTTPCCAStandaloneFramework::ReadEvent( std::istream &in, bool resetIds, bool addData, float shift, float minZ, float maxZ, bool silent, bool doQA )
 {
   //* Read event from file
-  int nClusters = 0;
+  int nClusters = 0, nCurrentClusters = 0;
+  if (addData) for (int i = 0;i < fgkNSlices;i++) nCurrentClusters += fClusterData[i].NumberOfClusters();
+  int nCurrentMCTracks = addData ? fMCInfo.size() : 0;
+  
+  int sliceOldClusters[36];
+  int sliceNewClusters[36];
+  int removed = 0;
   for ( int iSlice = 0; iSlice < fgkNSlices; iSlice++ ) {
-    fClusterData[iSlice].ReadEvent( in );
+    sliceOldClusters[iSlice] = addData ? fClusterData[iSlice].NumberOfClusters() : 0;
+    fClusterData[iSlice].ReadEvent( in, addData );
+    sliceNewClusters[iSlice] = fClusterData[iSlice].NumberOfClusters() - sliceOldClusters[iSlice];
     if (resetIds)
     {
-      for (int i = 0;i < fClusterData[iSlice].NumberOfClusters();i++)
+      for (int i = 0;i < sliceNewClusters[iSlice];i++)
       {
-        fClusterData[iSlice].Clusters()[i].fId = nClusters + i;
+        fClusterData[iSlice].Clusters()[sliceOldClusters[iSlice] + i].fId = nCurrentClusters + nClusters + i;
       }
     }
-    nClusters += fClusterData[iSlice].NumberOfClusters();
+    if (shift != 0.)
+    {
+      for (int i = 0;i < sliceNewClusters[iSlice];i++)
+      {
+        AliHLTTPCCAClusterData::Data& tmp = fClusterData[iSlice].Clusters()[sliceOldClusters[iSlice] + i];
+        tmp.fZ += iSlice < 18 ? shift : -shift;
+      }
+    }
+    nClusters += sliceNewClusters[iSlice];
+  }
+  if (nClusters)
+  {
+    if (doQA)
+    {
+      fMCLabels.resize(nCurrentClusters + nClusters);
+      in.read((char*) (fMCLabels.data() + nCurrentClusters), nClusters * sizeof(fMCLabels[0]));
+    }
+    if (!doQA || !in || in.gcount() != nClusters * (int) sizeof(fMCLabels[0]))
+    {
+      fMCLabels.clear();
+      fMCInfo.clear();
+    }
+    else
+    {
+      if (addData)
+      {
+          for (int i = 0;i < nClusters;i++)
+          {
+              for (int j = 0;j < 3;j++)
+              {
+                  AliHLTTPCClusterMCWeight& tmp = fMCLabels[nCurrentClusters + i].fClusterID[j];
+                  if (tmp.fMCID >= 0) tmp.fMCID += nCurrentMCTracks;
+              }
+          }
+      }
+      int nMCTracks = 0;
+      in.read((char*) &nMCTracks, sizeof(nMCTracks));
+      if (in.eof())
+      {
+        fMCInfo.clear();
+      }
+      else
+      {
+        fMCInfo.resize(nCurrentMCTracks + nMCTracks);
+        in.read((char*) (fMCInfo.data() + nCurrentMCTracks), nMCTracks * sizeof(fMCInfo[0]));
+        if (in.eof())
+        {
+            fMCInfo.clear();
+        }
+        else if (shift != 0.)
+        {
+            for (int i = 0;i < nMCTracks;i++)
+            {
+                AliHLTTPCCAMCInfo& tmp = fMCInfo[nCurrentMCTracks + i];
+                tmp.fZ += tmp.fZ > 0 ? shift : -shift;
+            }
+        }
+      }
+    }
+    if (minZ > -1e6 || maxZ > -1e6)
+    {
+      unsigned int currentCluster = nCurrentClusters;
+      unsigned int currentClusterTotal = nCurrentClusters;
+      for (int iSlice = 0;iSlice < 36;iSlice++)
+      {
+        int currentClusterSlice = sliceOldClusters[iSlice];
+        for (int i = sliceOldClusters[iSlice];i < sliceOldClusters[iSlice] + sliceNewClusters[iSlice];i++)
+        {
+          float sign = iSlice < 18 ? 1 : -1;
+          if (sign * fClusterData[iSlice].Clusters()[i].fZ >= minZ && sign * fClusterData[iSlice].Clusters()[i].fZ <= maxZ)
+          {
+            if (currentClusterSlice != i) fClusterData[iSlice].Clusters()[currentClusterSlice] = fClusterData[iSlice].Clusters()[i];
+            if (resetIds) fClusterData[iSlice].Clusters()[currentClusterSlice].fId = currentCluster;
+            if (fMCLabels.size() > currentClusterTotal && currentCluster != currentClusterTotal) fMCLabels[currentCluster] = fMCLabels[currentClusterTotal];
+            //printf("Keeping Cluster ID %d (ID in slice %d) Z=%f (sector %d) --> %d (slice %d)\n", currentClusterTotal, i, fClusterData[iSlice].Clusters()[i].fZ, iSlice, currentCluster, currentClusterSlice);
+            currentClusterSlice++;
+            currentCluster++;
+          }
+          else
+          {
+            //printf("Removing Cluster ID %d (ID in slice %d) Z=%f (sector %d)\n", currentClusterTotal, i, fClusterData[iSlice].Clusters()[i].fZ, iSlice);
+            removed++;
+          }
+          currentClusterTotal++;
+        }
+        fClusterData[iSlice].SetNumberOfClusters(currentClusterSlice);
+        sliceNewClusters[iSlice] = currentClusterSlice - sliceOldClusters[iSlice];
+      }
+      nClusters = currentCluster - nCurrentClusters;
+      if (currentCluster < fMCLabels.size()) fMCLabels.resize(currentCluster);
+    }
   }
 #ifdef HLTCA_STANDALONE
-  printf("Read %d Clusters\n", nClusters);
-#endif
-}
-
-void AliHLTTPCCAStandaloneFramework::WriteTracks( std::ostream &out ) const
-{
-  //* Write tracks to file
-
-  for ( int i = 0; i < 20; i++ ) out << fLastTime[i] << std::endl;
-  //fMerger.Output()->Write( out );
-}
-
-void AliHLTTPCCAStandaloneFramework::ReadTracks( std::istream &in )
-{
-  //* Read tracks  from file
-
-  for ( int i = 0; i < 20; i++ ) {
-    in >> fLastTime[i];
-    fStatTime[i] += fLastTime[i];
+  if (!silent)
+  {
+    printf("Read %d Clusters with %d MC labels and %d MC tracks\n", nClusters, (int) (fMCLabels.size() ? (fMCLabels.size() - nCurrentClusters) : 0), (int) fMCInfo.size() - nCurrentMCTracks);
+    if (minZ > -1e6 || maxZ > 1e6) printf("Removed %d / %d clusters\n", removed, nClusters + removed);
+    if (addData) printf("Total %d Clusters with %d MC labels and %d MC tracks\n", nClusters + nCurrentClusters, (int) fMCLabels.size(), (int) fMCInfo.size());
   }
-  //fMerger.Output()->Read( in );
+#endif
+  nClusters += nCurrentClusters;
+  return(nClusters);
 }
