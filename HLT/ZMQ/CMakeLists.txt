@@ -24,8 +24,7 @@ include_directories(${AliRoot_SOURCE_DIR}/HLT/ZMQ
                    )
 
 # Additional include folders in alphabetical order except ROOT
-include_directories(${ROOT_INCLUDE_DIR}
-                   )
+include_directories(SYSTEM ${ROOT_INCLUDE_DIR})
 
 # Sources in alphabetical order
 if(ZEROMQ_FOUND) 
@@ -66,9 +65,9 @@ set_target_properties(${MODULE} PROPERTIES COMPILE_FLAGS "")
 # System dependent: Modify the way the library is build
 if(${CMAKE_SYSTEM} MATCHES Darwin)
     set_target_properties(${MODULE} PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-    include_directories(/usr/X11R6/include)
+    include_directories(${X11_INCLUDE_DIR})
     SET(CMAKE_EXE_LINKER_FLAGS 
-      "${CMAKE_EXE_LINKER_FLAGS} -L/usr/X11R6/lib")
+      "${CMAKE_EXE_LINKER_FLAGS} -L${X11_LIB_DIR}")
 endif(${CMAKE_SYSTEM} MATCHES Darwin)
 
 # Installation

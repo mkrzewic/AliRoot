@@ -41,7 +41,6 @@ AliHLTTPCAgent gAliHLTTPCAgent;
 
 // component headers
 #include "AliHLTTPCCATrackerComponent.h"
-#include "AliHLTTPCCATrackerOutputConverter.h"
 #include "AliHLTTPCTrackMCMarkerComponent.h"
 #include "AliHLTTPCCAGlobalMergerComponent.h"
 #include "AliHLTTPCdEdxComponent.h"
@@ -224,7 +223,7 @@ int AliHLTTPCAgent::CreateConfigurations(AliHLTConfigurationHandler* handler,
     handler->CreateConfiguration(hwcfDecoder.Data(), "TPCHWClusterDecoder",hwclustOutput.Data(), "");
 	
 	arg="-offline-mode";
-	if (!bPublishRaw) arg+=" -do-mc";
+	if (!bPublishRaw) arg+=" -do-mc -offline-keep-initial-timestamp";
 
     TString clusterTransformation = "TPC-ClusterTransformation";
     handler->CreateConfiguration(clusterTransformation.Data(), "TPCClusterTransformation",hwcfDecoder.Data(), arg.Data() );
@@ -257,6 +256,7 @@ int AliHLTTPCAgent::CreateConfigurations(AliHLTConfigurationHandler* handler,
     dEdXInput+="TPC-globalmerger";
 
     handler->CreateConfiguration("TPC-dEdx","TPCdEdx",dEdXInput.Data(),"");
+    handler->CreateConfiguration("TPC-FastdEdx","FastTPCdEdx",dEdXInput.Data(),"");
 
     // compression component
     if (compressorInput.Length()>0) compressorInput+=" ";
@@ -404,7 +404,6 @@ int AliHLTTPCAgent::RegisterComponents(AliHLTComponentHandler* pHandler) const
   if (!pHandler) return -EINVAL;
 
   pHandler->AddComponent(new AliHLTTPCCATrackerComponent);
-  pHandler->AddComponent(new AliHLTTPCCATrackerOutputConverter);
   pHandler->AddComponent(new AliHLTTPCCAGlobalMergerComponent);
   pHandler->AddComponent(new AliHLTTPCTrackMCMarkerComponent);
   pHandler->AddComponent(new AliHLTTPCdEdxComponent);

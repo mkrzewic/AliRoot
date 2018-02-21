@@ -137,6 +137,85 @@ void AliExternalInfo::PrintConfig(){
 }
 
 
+///  AliExternalInfo::GetProductionTree(TString period, TString pass)
+/// \param period    - period ID
+/// \param pass      - pass ID
+/// \return production tree ()
+/// * Input data source MonALISA
+///   * Production information from MonALISA web interface - querying tags
+///     * PPass - https://alimonitor.cern.ch/prod/?t=1&res_path=mif
+///     * CPass - https://alimonitor.cern.ch/prod/?t=2&res_path=mif
+///     * MC - https://alimonitor.cern.ch/prod/?t=3&res_path=mif
+///   * Tags query not fully reliable as syntax was chenging several times
+///   * Only reliable information - path column in reulting tree (path to the output data)
+/// * Algorithm:
+///   * loop over all possible production (Prod, ProdCPassm, ProdMC)  for given period
+///   * loop over all passes for given production
+///   * check presence of output path
+///   * save tree in cache file
+/*!
+  Example usage:
+  \code
+  AliExternalInfo info;
+  TTree *  prodTree = info.GetProductionTree("LHC17f","pass1");
+  prodTree->Scan("RunNo:outputdir:jobs_error:jobs_total","","col=10:50:10:10");
+  TTree *  mcProdTree = info.GetProductionTree("LHC17k2","");
+  mcProdTree->Scan("RunNo:outputdir:jobs_error:jobs_total","","col=10:50:10:10");
+  \endcode
+*/
+TTree *  AliExternalInfo::GetProductionTree(TString period, TString pass){
+  TTree *productionTree=NULL;
+  TPRegexp regexpDir(TString::Format("/%s$",pass.Data()));
+  for (Int_t productionSource=0; productionSource<3; productionSource++){
+    TTree *  treeProductionAll = NULL;
+    if (productionSource==0) treeProductionAll = GetTree("MonALISA.ProductionCycle","","");
+    if (productionSource==1) treeProductionAll = GetTree("MonALISA.ProductionCPass","","");
+    if (productionSource==2) treeProductionAll = GetTree("MonALISA.ProductionMC","","");
+    treeProductionAll->SetBranchStatus("*",kFALSE);
+    treeProductionAll->SetBranchStatus("Tag",kTRUE);
+    treeProductionAll->SetBranchStatus("ID",kTRUE);
+    Int_t entriesAll=treeProductionAll->GetEntries();
+    for (Int_t i=0; i<entriesAll; i++){
+      treeProductionAll->GetEntry(i);
+      TString tag=((char*)treeProductionAll->GetLeaf("Tag")->GetValuePointer());
+      if (tag.Contains(period.Data())==0) continue;
+      Int_t id = TMath::Nint(treeProductionAll->GetLeaf("ID")->GetValue());
+      if (fVerbose&0x2) ::Info("GetProductionTree","Check id %d\t%s",id, tag.Data());
+      TTree * cTree = GetTreeProdCycleByID(TString::Format("%d", id));
+      if (cTree==NULL) continue;
+      if (productionSource==2) {  // do not check dir for the MC production  - different naming convention
+        productionTree=cTree;
+        break;
+      }
+      cTree->GetEntry(0);
+      TString dir=((char*)cTree->GetLeaf("outputdir")->GetValuePointer());
+      if (regexpDir.Match(dir)){
+         productionTree=cTree;
+         break;
+      }
+    }
+    delete treeProductionAll;
+    if (productionTree) { // save file in predefined folder
+      TString outputPath = CreatePath("MonALISA.Production",period,pass);
+      if (gSystem->Getenv("AliExternalInfoCache")){
+        outputPath.Prepend(gSystem->Getenv("AliExternalInfoCache"));
+      }else{
+        outputPath.Prepend(".");
+      }
+      gSystem->mkdir(outputPath,kTRUE);
+      outputPath+=fConfigMap["MonALISA.Production.filename"];
+      TFile *f = TFile::Open(outputPath.Data(),"recreate");
+      TTree *copyTree = productionTree->CopyTree("");
+      copyTree->Write(fConfigMap["MonALISA.Production.treename"]);
+      f->Close();
+      if (fVerbose&0x1) ::Info("GetProductionTree","Make cache path %s",outputPath.Data());
+      return productionTree;
+    }
+  }
+  return NULL;
+}
+
+
 /// Sets up all variables according to period, pass and type. Extracts information from the config file
 void AliExternalInfo::SetupVariables(TString& internalFilename, TString& internalLocation, Bool_t& resourceIsTree, TString& pathStructure, \
                                      TString& detector, TString& rootFileName, TString& treeName, const TString& type, const TString& period, const TString& pass, TString & indexName){
@@ -197,7 +276,7 @@ Bool_t AliExternalInfo::Cache(TString type, TString period, TString pass){
   TString rootFileName = "";
   TString treeName = "";
   TString pathStructure = "";
-  TString indexName=""; 
+  TString indexName="";
   TString oldIndexName= fConfigMap[type + ".indexname"];  // rename index branch to avoid incositencies (bug in ROOT - the same index branch name requeired) 
 
   // initialization of external variables
@@ -209,27 +288,47 @@ Bool_t AliExternalInfo::Cache(TString type, TString period, TString pass){
   // Checking if resource needs to be downloaded
   const Bool_t downloadNeeded = IsDownloadNeeded(internalFilename, type);
 
+  TString mifFilePath = ""; // Gets changed in Curl command
+
   if (downloadNeeded == kTRUE){
+    if (resourceIsTree == kTRUE && externalLocation.Contains("http")) {
+      externalLocation += pathStructure + rootFileName;
+      Int_t fstatus=0;
+      TString command = CurlTree(internalFilename, externalLocation);
+      std::cout << command << std::endl;
+      gSystem->Exec(command.Data());
+      TFile * fcache = TFile::Open(internalFilename);
+      if (fcache!=NULL && !fcache->IsZombie()) {
+        fstatus|=1;
+        delete fcache;
+      }
+      if (fstatus==1) {
+        gSystem->GetFromPipe(Form("touch %s",internalFilename.Data()));  // Update the access and modification times of each FILE to the current time
+        return kTRUE;
+      }else{
+        AliError("Curl caching failed");
+        gSystem->GetFromPipe(Form("rm %s",internalFilename.Data()));
+        return kFALSE;
+      }
+    }
     // Download resources in the form of .root files in a tree
-    if (resourceIsTree == kTRUE){
+    if (resourceIsTree == kTRUE ) {
       externalLocation += pathStructure + rootFileName;
       AliInfo(TString::Format("Information retrieved from: %s", externalLocation.Data()));
-
       // Check if external location is a http address or locally accessible
-//       std::cout << externalLocation(0, 4) << std::endl;
+      //    std::cout << externalLocation(0, 4) << std::endl;
       TFile *file = TFile::Open(externalLocation);
-      if (file && !file->IsZombie()){ // Checks if webresource is available
+      if (file && !file->IsZombie()) { // Checks if webresource is available
+        AliInfo("Resource available");
         if (file->Cp(internalFilename)) {
-          AliInfo("Caching successful");
+          AliInfo("Caching with TFile::Cp() successful");
           return kTRUE;
-        }
-        else {
+        } else {
           AliError("Copying to internal location failed");
           return kFALSE;
         }
-      }
-      else {
-        AliError("Ressource not available");
+      } else {
+        AliError("Resource not available");
         return kFALSE;
       }
       delete file;
@@ -243,16 +342,16 @@ Bool_t AliExternalInfo::Cache(TString type, TString period, TString pass){
         externalLocation = TString::Format(externalLocation.Data(), period.Data());
       }
 
-      TString mifFilePath = ""; // Gets changed in Curl command
-      TString command = Curl(mifFilePath, internalLocation, rootFileName, externalLocation);
+
+      TString command = CurlMif(mifFilePath, internalLocation, rootFileName, externalLocation);
 
       std::cout << command << std::endl;
       gSystem->Exec(command.Data());
       if (oldIndexName.Length()==0){
-	gSystem->Exec(TString::Format("cat %s | sed -l 1 s/raw_run/run/ |  sed -l 1 s/RunNo/run/ > %s",mifFilePath.Data(),  (mifFilePath+"RunFix").Data())); // use standrd run number IDS
+        gSystem->Exec(TString::Format("cat %s | sed -l 1 s/raw_run/run/ |  sed -l 1 s/RunNo/run/ > %s",mifFilePath.Data(),  (mifFilePath+"RunFix").Data())); // use standrd run number IDS
       }else{
-	gSystem->Exec(TString::Format("cat %s | sed -l 1 s/%s/%s/  > %s",mifFilePath.Data(), oldIndexName.Data(), indexName.Data(),  (mifFilePath+"RunFix").Data())); // use standrd run number IDS
-      } 
+        gSystem->Exec(TString::Format("cat %s | sed -l 1 s/%s/%s/  > %s",mifFilePath.Data(), oldIndexName.Data(), indexName.Data(),  (mifFilePath+"RunFix").Data())); // use standrd run number IDS
+      }
 
       gSystem->GetFromPipe(TString::Format("cat %s  | sed s_\\\"\\\"_\\\"\\ \\\"_g | sed s_\\\"\\\"_\\\"\\ \\\"_g > %s",  (mifFilePath+"RunFix").Data(),  (mifFilePath+"RunFix").Data()).Data());
       // Store it in a tree inside a root file
@@ -278,6 +377,44 @@ Bool_t AliExternalInfo::Cache(TString type, TString period, TString pass){
     return kTRUE;
   }
 }
+
+/// Cache selected production trees.  Input production list obtained from MonALISA web interface
+/// \param select      - selection mask
+/// \param reject      - rejection mask
+/// \param sourceList  - list of detectors to cache
+/*!
+   Example usage:
+   \code
+        AliExternalInfo::CacheProduction(TPRegexp("LHC17.*"),TPRegexp("cpass0"),"QA.TPC;QA.EVS;QA.TRD;QA.rawTPC;QA.ITS;Logbook;QA.TOF;Logbook.detector");
+   \endcode
+*/
+void AliExternalInfo::CacheProduction(TPRegexp select, TPRegexp reject, TString sourceList){
+  AliExternalInfo info;
+  TTree* treeProd = info.GetTreeProdCycle();
+  Int_t entries=treeProd->GetEntries();
+  TObjArray * detectorArray=sourceList.Tokenize(";");
+  for (Int_t i=0; i<entries; i++){
+    treeProd->GetEntry(i);
+    char * productionTag= (char*)treeProd->GetLeaf("Tag")->GetValuePointer();
+    if (select.Match(productionTag)==0) continue;
+    if (reject.Match(productionTag)==1) continue;
+    printf("Caching\t%s\n",productionTag);
+    TString production(productionTag);
+    Int_t pos=production.First('_');
+    if (pos<0) continue;
+    if (pos>production.Length()-4) continue;
+    printf("Caching\t%s\n",productionTag);
+    TString period( production(0,pos));
+    TString pass(production(pos+1, production.Length()-pos-1));
+    printf("Caching\t%s\t%s\t%s\n",productionTag,period.Data(),pass.Data());
+    for (Int_t iDet=0;iDet<detectorArray->GetEntries(); iDet++) {
+      info.Cache(detectorArray->At(iDet)->GetName(), period.Data(), pass.Data());
+    }
+  }
+}
+
+
+
 
 /// \param type Type of the resource as described in the config file, e.g. QA.TPC, MonALISA.RCT
 /// \param period Period, e.g. 'LHC15f'
@@ -334,7 +471,8 @@ TTree* AliExternalInfo::GetTree(TString type, TString period, TString pass, Int_
     if (fVerbose>1) AliInfo(TString::Format("Successfully read %s/%s",internalFilename.Data(), tree->GetName()));
     if (buildIndex==1) BuildIndex(tree, type);
   } else {
-    AliError("Error while reading tree");
+    AliError("Error while reading tree: ");
+    AliError(TString::Format("ERROR READING: %s", treeName.Data()));
   }
 
   const TString cacheSize=fConfigMap[type + ".CacheSize"];
@@ -441,7 +579,7 @@ TTree*  AliExternalInfo::GetTree(TString type, TString period, TString pass, TSt
 /// \param pass E.g. 'pass2' or 'passMC'. Here you can use wildcards like in 'ls', e.g. 'pass*'
 /// Returns a chain with the information from the corresponding resources.
 /// \return TChain*
-TChain* AliExternalInfo::GetChain(TString type, TString period, TString pass){
+TChain* AliExternalInfo::GetChain(TString type, TString period, TString pass, Int_t buildIndex){
   // FIXME  - here we should also fix Leave name bug
   TChain* chain = 0x0;
   TString internalFilename = ""; // Resulting path to the file
@@ -494,10 +632,68 @@ TChain* AliExternalInfo::GetChain(TString type, TString period, TString pass){
   if (cache>0) chain->SetCacheSize(cache);
 
   AddChain(type, period, pass);
+  BuildIndex(chain,type);
+  TString metadataMacro=fConfigMap[type + ".metadataMacro"];
+  chain->Draw("Entry$","1","goff",1);
+  if (metadataMacro.Length()>0 && chain->GetTree()) {  // rename branch  with index if specified in configuration file
+    if (fVerbose>1) printf("Processing metadata macro:\n gROOT->ProcessLine(.x %s((TTree*)%p,%d);",     metadataMacro.Data(),chain->GetTree(), fVerbose);
+    gROOT->ProcessLine(TString::Format(".x %s((TTree*)%p,%d);",metadataMacro.Data(),chain->GetTree(),fVerbose).Data());
+  }
+
   delete arrFiles;
   delete arrTreeName;
   return chain;
 };
+
+/// \param type Type of the resource as described in the config file, e.g. QA.TPC, MonALISA.RCT
+/// \param period Period, e.g. 'LHC15f'. Here you can use wildcards like in 'ls', e.g. 'LHC15*'
+/// \param pass E.g. 'pass2' or 'passMC'. Here you can use wildcards like in 'ls', e.g. 'pass*'
+/// Returns a chain with the information from the corresponding resources.
+/// \return TChain*
+TChain* AliExternalInfo::GetChain(TString type, TString period, TString pass, TString friendList){
+  TChain *chain = GetChain(type.Data(),period.Data(),pass.Data(),kFALSE);
+  if (chain==0){
+    ::Error("AliExternalInfo::GetChain", "Invalid tree description %s\t%s\t%s",type.Data(), period.Data(),pass.Data());
+  }
+  TObjArray * arrFriendList= friendList.Tokenize(";");
+  for (Int_t ilist=0; ilist<arrFriendList->GetEntriesFast(); ilist++) {
+
+    TString fname=arrFriendList->At(ilist)->GetName();
+    TString conditionName="";
+    TString condition="";
+    Int_t nDots = fname.CountChar(':');
+    TChain *chainF =NULL;
+
+    // in case there are more than one entry for primary index - secondary key has to be specified
+    // following syntax is used in this case <treeID>:conditionName:condition
+    //     e.g Logbook.detector:TPC:detector==\"TPC\"
+    if (nDots!=0 && nDots!=2) continue;
+    if (nDots==2){
+      TObjArray * tokenArray = fname.Tokenize(":");
+      fname=tokenArray->At(0)->GetName();
+      conditionName=tokenArray->At(1)->GetName();
+      condition=tokenArray->At(2)->GetName();
+      delete tokenArray;
+    }
+
+    chainF=GetChain(fname.Data(), period.Data(), pass.Data(),kTRUE);
+
+    if (chainF){
+      if (nDots!=2) {
+        chain->AddFriend(chainF, arrFriendList->At(ilist)->GetName());
+      }else{
+        chain->SetAlias(conditionName.Data(),"(1+0)");
+        chainF->SetAlias(conditionName.Data(),condition.Data());
+        chainF->BuildIndex(chainF->GetTreeIndex()->GetMajorName(), conditionName.Data());
+        chain->AddFriend(chainF, (fname+"_"+conditionName).Data());
+      }
+    }else{
+      ::Error("AliExternalInfo::GetChain", "Invalid friend tree\t%s\t%s",arrFriendList->At(ilist)->GetName(), friendList.Data());
+      continue;
+    }
+  }
+  return chain;
+}
 
 /// Every tree you create is added to a big tree acting as a friend.
 /// You can have access to this tree with the GetFriendsTree() function.
@@ -515,14 +711,15 @@ Bool_t AliExternalInfo::BuildIndex(TTree* tree, TString type){
   //
   if (oldIndexName.Length()>0){  // rename branch  with index if specified in configuration file
     if (tree->GetBranch(oldIndexName.Data())) {
-      tree->GetBranch(oldIndexName.Data())->SetName(indexName.Data());
+      tree->SetAlias(indexName.Data(),oldIndexName.Data());
     }
   }
   if (indexName.Length()<=0) { // set default index name
-    if (tree->GetListOfBranches()->FindObject("run"))  indexName="run";    
+     indexName="run";
+    if (tree->GetListOfBranches()!=NULL) if (tree->GetListOfBranches()->FindObject("run"))  indexName="run";
   }
   if (indexName.Length()<=0) {
-    ::Error("AliExternalInfo::BuildIndex","Index %s not avaible for type %s", indexName.Data(), type.Data());
+    ::Error("AliExternalInfo::BuildIndex","Index %s not available for type %s", indexName.Data(), type.Data());
   }  
   if (tree->GetBranch(indexName.Data()) && TString(tree->GetBranch(indexName.Data())->GetTitle()).Contains("/C")){
     BuildHashIndex(tree,indexName.Data(),"hashIndex");
@@ -531,24 +728,7 @@ Bool_t AliExternalInfo::BuildIndex(TTree* tree, TString type){
   }
   TStatToolkit::AddMetadata(tree,"TTree.indexName",indexName.Data());
 
- //  TString name = "";
-
-//   if(type.Contains("QA")){ // use TPC instead of QA.TPC
-//     name = type(3, type.Length()-1);
-//   }
-//   else if(type.Contains("MonALISA")){
-//     name = type(9, type.Length()-1);
-//   }
-//   else {
-//     name = type;
-//   }
-//   tree->SetName(name);
-//   if (fTree == 0x0) fTree = dynamic_cast<TTree*>(tree->Clone());
-
- 
-//   fTree->AddFriend(tree, name);  
-//  AliInfo(TString::Format("Added as friend with the name: %s",name.Data()));
-  ::Info("AliExternalInfo::BuildIndex", "TreeName:%s;IndexName:%s",tree->GetName(), indexName.Data());
+  if (fVerbose&0x2) ::Info("AliExternalInfo::BuildIndex", "TreeName:%s;IndexName:%s",tree->GetName(), indexName.Data());
   return kTRUE;
 }
 /// \param type Type of the resource as described in the config file, e.g. QA.TPC, MonALISA.RCT
@@ -659,7 +839,7 @@ Bool_t AliExternalInfo::IsDownloadNeeded(TString file, TString type){
 /// \param externalLocation Location specified in the config file
 /// Composes the curl-command in a TString which afterwards then can be executed
 /// \return curl-command in a TString
-const TString AliExternalInfo::Curl(TString& mifFilePath, const TString& internalLocation, TString rootFileName, const TString& externalLocation){
+const TString AliExternalInfo::CurlMif(TString& mifFilePath, const TString& internalLocation, TString rootFileName, const TString& externalLocation){
   TString command = "";
   TString certificate("$HOME/.globus/usercert.pem");
   TString privateKey("$HOME/.globus/userkey.pem");
@@ -675,6 +855,21 @@ const TString AliExternalInfo::Curl(TString& mifFilePath, const TString& interna
   command = TString::Format("curl -z %s -k --tlsv1 --cert %s --key %s -o %s 2>%s \"%s\"",
                                      mifFilePath.Data(), certificate.Data(), privateKey.Data(),
                                      mifFilePath.Data(), logFileName.Data(), externalLocation.Data());
+  if ((fVerbose&0x4)>0) {
+    ::Info("AliExternalInfo::Curl","%s",command.Data());
+  }
+  return command;
+}
+
+const TString AliExternalInfo::CurlTree(const TString internalFilename, const TString& externalLocation){
+  TString command = "";
+  TString certificate("$HOME/.globus/usercert.pem");
+  TString privateKey("$HOME/.globus/userkey.pem");
+
+
+  command = TString::Format("curl -Lk -z %s --tlsv1 --cert %s --key %s -o %s \"%s\"",     //-L option required to get files from redirected URL
+                                     internalFilename.Data(),certificate.Data(), privateKey.Data(),
+                                     internalFilename.Data(), externalLocation.Data());
 
   return command;
 }
@@ -1134,6 +1329,9 @@ TTree*  AliExternalInfo::GetTreeMCPassGuess(){
                 cout<<"Looking for MC aliphys: "<<tempprod.aliphys<<" MC aliroot: "<<tempprod.aliroot<<endl;
                 if(!((*iter).anchpass).Contains("cpass") && !((*iter).anchpass).Contains("cosmic") && (!isgp || TPRegexp("^pass").MatchB((*iter).anchpass,"i"))){
                 cout<<"Used for guess: RDphys:"<<(*iter).aliphys<<" RDroot: "<<(*iter).aliroot<<" RDpass guess: "<<(*iter).anchpass<<endl;
+                *osrdpass=TObjString(iter->anchpass);
+                *osrdaliphys=TObjString(iter->aliphys);
+                *osrdaliroot=TObjString(iter->aliroot);
                 break;
                     }
                 if(iter==list.begin()) break;
@@ -1182,9 +1380,12 @@ TString  AliExternalInfo::GetMCPassGuess(TString sMCprodname){
 }
  
  char pMCprodname[1000];
+
  TObjString osMCprodname=0;
+ TObjString* osAnchprodname=0;
  TObjString* osMCpassguess=0;
- 
+
+ guesstree->GetBranch("anchorProdTag_ForGuess")->SetAddress(&osAnchprodname); 
  guesstree->GetBranch("prodName")->SetAddress(&pMCprodname);
  guesstree->GetBranch("anchorPassName_guess")->SetAddress(&osMCpassguess);
  
@@ -1193,7 +1394,7 @@ TString  AliExternalInfo::GetMCPassGuess(TString sMCprodname){
      osMCprodname = TObjString(pMCprodname);
      if(osMCprodname.String()==sMCprodname){       //if match found return corresponding guess
          cout<<"Anchor Pass guess for "<<osMCprodname.String()<<": "<<osMCpassguess->String()<<endl;
-         return(osMCpassguess->String());
+         return(osAnchprodname->String()+" "+osMCpassguess->String());
      }
  }
  cout<<osMCprodname.String()<<" was not found in list of MC productions"<<endl;
