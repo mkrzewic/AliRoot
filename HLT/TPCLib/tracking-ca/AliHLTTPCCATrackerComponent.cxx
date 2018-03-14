@@ -51,6 +51,7 @@
 #include "AliMCParticle.h"
 #include "AliTrackReference.h"
 #include "AliHLTTPCCAMCInfo.h"
+#include "AliHLTTPCGMMergedTrackHit.h"
 #include "TPDGCode.h"
 #if __GNUC__>= 3
 using namespace std;
@@ -727,6 +728,8 @@ void* AliHLTTPCCATrackerComponent::TrackerDoEvent(void* par)
             pCluster->fY = c.GetY();
             pCluster->fZ = c.GetZ();
             pCluster->fRow = firstRow + cRaw.GetPadRow();
+            pCluster->fFlags = cRaw.GetFlags();
+            if (cRaw.GetSigmaPad2() < kAlmost0 || cRaw.GetSigmaTime2() < kAlmost0) pCluster->fFlags |= AliHLTTPCGMMergedTrackHit::flagSingle;
             pCluster->fAmp = cRaw.GetCharge();
 #ifdef HLTCA_FULL_CLUSTERDATA
             pCluster->fPad = cRaw.GetPad();
@@ -734,7 +737,6 @@ void* AliHLTTPCCATrackerComponent::TrackerDoEvent(void* par)
             pCluster->fAmpMax = cRaw.GetQMax();
             pCluster->fSigmaPad2 = cRaw.GetSigmaPad2();
             pCluster->fSigmaTime2 = cRaw.GetSigmaTime2();
-            pCluster->fFlags = cRaw.GetFlags();
 #endif
             pCluster++;
           }
@@ -847,22 +849,6 @@ void* AliHLTTPCCATrackerComponent::TrackerDoEvent(void* par)
             std::vector<AliHLTTPCCAMCInfo> mcInfo(nTracks);
             memset(mcInfo.data(), 0, nTracks * sizeof(mcInfo[0]));
             
-            for (int i = 0;i < labels.size();i++)
-            {
-              float weightTotal = 0.f;
-              for (int j = 0;j < 3;j++) if (labels[i].fClusterID[j].fMCID >= 0) weightTotal += labels[i].fClusterID[j].fWeight;
-              for (int j = 0;j < 3;j++) if (labels[i].fClusterID[j].fMCID >= 0)
-              {
-                if (labels[i].fClusterID[j].fMCID < nTracks)
-                {
-                  mcInfo[labels[i].fClusterID[j].fMCID].fNWeightCls += labels[i].fClusterID[j].fWeight / weightTotal;
-                }
-                else
-                {
-                  printf("Invalid cluster label %d / %d\n", labels[i].fClusterID[j].fMCID, nTracks);
-                }
-              }
-            }
             for (int i = 0;i < nTracks;i++)
             {
               mcInfo[i].fPID = -100;
@@ -877,6 +863,7 @@ void* AliHLTTPCCATrackerComponent::TrackerDoEvent(void* par)
               mcInfo[i].fCharge = charge;
               mcInfo[i].fPrim = prim;
               mcInfo[i].fPrimDaughters = hasPrimDaughter;
+              mcInfo[i].fGenRadius = sqrt(particle->Vx()*particle->Vx()+particle->Vy()*particle->Vy()+particle->Vz()*particle->Vz());
               
               Int_t pid = -1;
               if(TMath::Abs(particle->GetPdgCode()) == kElectron) pid = 0;
