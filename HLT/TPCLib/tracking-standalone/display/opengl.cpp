@@ -339,7 +339,7 @@ void DrawFinal(AliHLTTPCCAStandaloneFramework &hlt)
 			for (int k = 0; k < track.NClusters(); k++)
 			{
 				if (hideRejectedClusters && (merger.Clusters()[track.FirstClusterRef() + k].fState & AliHLTTPCGMMergedTrackHit::flagReject)) continue;
-				int cid = merger.Clusters()[track.FirstClusterRef() + k].fId;
+				int cid = merger.Clusters()[track.FirstClusterRef() + k].fNum;
 				float dist = globalPos[cid].x * globalPos[cid].x + globalPos[cid].y * globalPos[cid].y + globalPos[cid].z * globalPos[cid].z;
 				if (dist < smallest)
 				{

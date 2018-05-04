@@ -71,6 +71,7 @@ AliHLTTPCGMMerger::AliHLTTPCGMMerger()
   fSliceTrackInfos( 0 ),
   fMaxSliceTracks(0),
   fClusters(NULL),
+  fGlobalClusterIDs(NULL),
   fBorderMemory(0),
   fBorderRangeMemory(0),
   fGPUTracker(NULL),
@@ -104,6 +105,7 @@ AliHLTTPCGMMerger::AliHLTTPCGMMerger(const AliHLTTPCGMMerger&)
   fSliceTrackInfos( 0 ),  
   fMaxSliceTracks(0),
   fClusters(NULL),
+  fGlobalClusterIDs(NULL),
   fBorderMemory(0),
   fBorderRangeMemory(0),
   fGPUTracker(NULL),
@@ -161,6 +163,7 @@ void AliHLTTPCGMMerger::ClearMemory()
     if (fOutputTracks) delete[] fOutputTracks;
     if (fClusters) delete[] fClusters;
   }
+  if (fGlobalClusterIDs) delete[] fGlobalClusterIDs;
   if (fBorderMemory) delete[] fBorderMemory;
   if (fBorderRangeMemory) delete[] fBorderRangeMemory;
 
@@ -169,8 +172,9 @@ void AliHLTTPCGMMerger::ClearMemory()
   fSliceTrackInfos = 0;
   fMaxSliceTracks = 0;
   fClusters = NULL;
-  fBorderMemory = 0;  
-  fBorderRangeMemory = 0;
+  fGlobalClusterIDs = NULL;
+  fBorderMemory = NULL;
+  fBorderRangeMemory = NULL;
 }
 
 void AliHLTTPCGMMerger::SetSliceData( int index, const AliHLTTPCCASliceOutput *sliceData )
@@ -278,6 +282,7 @@ bool AliHLTTPCGMMerger::AllocateMemory()
     fOutputTracks = new AliHLTTPCGMMergedTrack[nTracks];
     fClusters = new AliHLTTPCGMMergedTrackHit[fNClusters];
   }
+  fGlobalClusterIDs = new int[fNClusters];
   fBorderMemory = new AliHLTTPCGMBorderTrack[fMaxSliceTracks*2];
   fBorderRangeMemory = new AliHLTTPCGMBorderTrack::Range[fMaxSliceTracks*2];
   
@@ -784,13 +789,18 @@ void AliHLTTPCGMMerger::CollectMergedTracks()
       }
       
       AliHLTTPCGMMergedTrackHit *cl = fClusters + nOutTrackClusters;
+      int* clid = fGlobalClusterIDs + nOutTrackClusters;
       for( int i=0; i<nHits; i++ )
       {
           cl[i].fX = trackClusters[i].GetX();
           cl[i].fY = trackClusters[i].GetY();
           cl[i].fZ = trackClusters[i].GetZ();
           cl[i].fRow = trackClusters[i].GetRow();
-          cl[i].fId = trackClusters[i].GetId();
+          //Produce consecutive numbers for shared cluster flagging
+          {
+              cl[i].fNum = nOutTrackClusters + i;
+              clid[i] = trackClusters[i].GetId();
+          }
           cl[i].fAmp = trackClusters[i].GetAmp();
           cl[i].fState = trackClusters[i].GetFlags() & AliHLTTPCGMMergedTrackHit::hwcfFlags; //Only allow edge and deconvoluted flags
           cl[i].fSlice = clA[i].x;
@@ -847,18 +857,18 @@ void AliHLTTPCGMMerger::CollectMergedTracks()
   unsigned int maxId = 0;
   for (int k = 0;k < nOutTrackClusters;k++)
   {
-    if (fClusters[k].fId > maxId) maxId = fClusters[k].fId;
+      maxId = nOutTrackClusters;
   }
   maxId++;
   unsigned char* sharedCount = new unsigned char[maxId];
   for (unsigned int k = 0;k < maxId;k++) sharedCount[k] = 0;
   for (int k = 0;k < nOutTrackClusters;k++)
   {
-    if (sharedCount[fClusters[k].fId] < 255) sharedCount[fClusters[k].fId]++;
+    sharedCount[fClusters[k].fNum] = (sharedCount[fClusters[k].fNum] << 1) | 1;
   }
   for (int k = 0;k < nOutTrackClusters;k++)
   {
-    if (sharedCount[fClusters[k].fId] >= 2) fClusters[k].fState |= AliHLTTPCGMMergedTrackHit::flagShared;
+    if (sharedCount[fClusters[k].fNum] > 1) fClusters[k].fState |= AliHLTTPCGMMergedTrackHit::flagShared;
   }
   delete[] sharedCount;
   
