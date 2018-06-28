@@ -2947,11 +2947,16 @@ Double_t AliTPCcalibDB::GetGainCorrectionHVandPT(Int_t timeStamp, Int_t run, Int
     if (!graphGHV) graphGHV = fParam->GetGainSlopesHV();
     if (!graphGPT) graphGPT = fParam->GetGainSlopesPT();
     //
+    static bool show_info = !(getenv("HLT_ONLINE_MODE") && strcmp(getenv("HLT_ONLINE_MODE"), "on") == 0);
+    static int nErrors = 0;
     for (Int_t isec=0; isec<72; isec++){
       Double_t HV= GetChamberHighVoltage(run,isec, timeStamp);
       if (HV<=0){ // check if the HV was available
         HV=GetChamberCurrentNominalHighVoltage(isec);
-        AliWarningF("Could not get proper HV for run,sec,time (%d, %2d, %d), using current nominal voltage: %.2f", run, isec, timeStamp, HV);
+        if (show_info || nErrors++ < 72)
+        {
+          AliWarningF("Could not get proper HV for run,sec,time (%d, %2d, %d), using current nominal voltage: %.2f", run, isec, timeStamp, HV);
+        }
 //         AliDCSSensor* sensor = GetChamberHVSensor(isec);
 //         if (sensor && sensor->GetGraph()==NULL &&  sensor->GetFit()==NULL){
 //           HV=fParam->GetNominalVoltage(isec);
