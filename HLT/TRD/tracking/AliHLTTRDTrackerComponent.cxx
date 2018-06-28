@@ -238,7 +238,7 @@ int AliHLTTRDTrackerComponent::DoEvent
   if (!IsDataEvent()) return 0;
 
   if ( evtData.fBlockCnt <= 0 ) {
-    HLTWarning( "no blocks in event" );
+    HLTInfo( "no blocks in event" );
     return 0;
   }
 
@@ -288,12 +288,12 @@ int AliHLTTRDTrackerComponent::DoEvent
   }
 
   if (tpcData == NULL) {
-    HLTError("did not receive any TPC tracks. Skipping event");
+    HLTInfo("did not receive any TPC tracks. Skipping event");
     return 0;
   }
 
   if (nTrackletsTotal == 0) {
-    HLTError("did not receive any TRD tracklets. Skipping event");
+    HLTInfo("did not receive any TRD tracklets. Skipping event");
     return 0;
   }
 
