@@ -825,7 +825,9 @@ bool AliHLTTRDTracker::AdjustSector(AliHLTTRDTrack *t, const int layer) const
     return false;
   }
 
+  int nTries = 0;
   while (TMath::Abs(y) > yMax) {
+    if (nTries++ >= 3) return false;
     int sign = (y > 0) ? 1 : -1;
     if (!t->Rotate(alphaCurr + alpha * sign)) {
       return false;
