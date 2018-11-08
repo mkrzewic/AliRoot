@@ -135,7 +135,7 @@ Int_t process(TCollection *lIn = 0x0, TCollection *lOut = 0x0) {
     //Prepare reference histogram in case it does not exist
     if(!hReferenceV0M){
         hReferenceV0M = new TH1F("fHistReferenceV0M", "", 1000, -0.5, 999.5);
-        for(Int_t i=1; i<1000; i++)
+        for(Int_t i=1; i<900; i++)
             hReferenceV0M->SetBinContent(i, lReferenceY[i]);
         hReferenceV0M->SetDirectory(0);
     }
