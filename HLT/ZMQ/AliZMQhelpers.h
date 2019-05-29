@@ -151,9 +151,10 @@ struct DataTopic : public BaseDataTopic
   static const UInt_t fgkTopicSerialization;
   ULong64_t fDataDescription[2]; // 2*8 bytes
   UInt_t fDataOrigin; // 4 bytes
-  UInt_t fReserved;   // 4 bytes
+  UInt_t fSplitPayloadParts;   // 4 bytes
   ULong64_t fDataSerialization; // 8 bytes
-  ULong64_t fSpecification;     // 8 bytes data specification of the data block
+  UInt_t fSpecification;     // 4 bytes data specification of the data block
+  UInt_t fSplitPayloadIndex; // 4 bytes index of split payload
   ULong64_t fPayloadSize;       // 8 bytes
 
   //ctor
@@ -161,9 +162,10 @@ struct DataTopic : public BaseDataTopic
     : BaseDataTopic(sizeof(DataTopic), fgkDataTopicDescription, fgkTopicSerialization, more)
     , fDataDescription()
     , fDataOrigin(0)
-    , fReserved(0)
+    , fSplitPayloadParts(0)
     , fDataSerialization(0)
     , fSpecification(0)
+    , fSplitPayloadIndex(0)
     , fPayloadSize(0)
   {
     fDataDescription[0]=0;
@@ -171,13 +173,14 @@ struct DataTopic : public BaseDataTopic
   }
 
   //ctor
-  DataTopic(const char* id, const char* origin, ULong64_t spec, ULong64_t serialization, bool more = false)
+  DataTopic(const char* id, const char* origin, UInt_t spec, ULong64_t serialization, bool more = false)
     : BaseDataTopic(sizeof(DataTopic), fgkDataTopicDescription, fgkTopicSerialization, more)
     , fDataDescription()
     , fDataOrigin(0)
-    , fReserved(0)
+    , fSplitPayloadParts(0)
     , fDataSerialization(serialization)
     , fSpecification(spec)
+    , fSplitPayloadIndex(0)
     , fPayloadSize(0)
   {
     if (strlen(id)<8) {
